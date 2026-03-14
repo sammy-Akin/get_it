@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "347991149828",
+    "project_id": "getit-db879",
+    "storage_bucket": "getit-db879.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:347991149828:android:2b6c9db7111125df90d451",
+        "android_client_info": {
+          "package_name": "com.example.get_it"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAEkbVzAH_nPe2Q6ofFxS7qHTSNufYGlg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
