@@ -9,11 +9,10 @@ class CartProvider extends ChangeNotifier {
 
   int get totalItems => _cart.totalItems;
   double get subtotal => _cart.subtotal;
+  double get serviceCharge => _cart.serviceCharge;
   double get deliveryFee => _cart.deliveryFee;
+  double get riderIncentive => _cart.riderIncentive;
   double get total => _cart.total;
-
-  int getQuantity(String productId) => _cart.getQuantity(productId);
-  bool contains(String productId) => _cart.contains(productId);
 
   void addItem(ProductModel product) {
     _cart.addItem(product);
@@ -34,4 +33,7 @@ class CartProvider extends ChangeNotifier {
     _cart.clear();
     notifyListeners();
   }
+
+  int getQuantity(String productId) => _cart.getQuantity(productId);
+  bool contains(String productId) => _cart.contains(productId);
 }

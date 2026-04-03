@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html show window;
 import '../core/theme.dart';
 import '../services/auth_service.dart';
 
@@ -37,6 +40,13 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _navigate() async {
+    // Critical: if this is a payment callback page reload, do NOT navigate
+    // away. The PaymentCallbackScreen handles everything from here.
+    if (kIsWeb) {
+      final uri = Uri.parse(html.window.location.href);
+      if (uri.path.contains('/payment/callback')) return;
+    }
+
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;
 
@@ -47,7 +57,6 @@ class _SplashScreenState extends State<SplashScreen>
       return;
     }
 
-    // Fetch role and route accordingly
     final role = await AuthService().getUserRole(user.uid);
     if (!mounted) return;
 

@@ -89,7 +89,6 @@ class _SearchScreenState extends State<SearchScreen>
       // Search shops
       final shopSnap = await FirebaseFirestore.instance
           .collection('getit_vendors')
-          .where('isOpen', isEqualTo: true)
           .get();
 
       final shops = shopSnap.docs
@@ -97,7 +96,8 @@ class _SearchScreenState extends State<SearchScreen>
           .where(
             (s) =>
                 s.name.toLowerCase().contains(_query) ||
-                s.category.toLowerCase().contains(_query),
+                s.category.toLowerCase().contains(_query) ||
+                s.description.toLowerCase().contains(_query),
           )
           .toList();
 

@@ -391,13 +391,13 @@ class CartScreen extends StatelessWidget {
           _buildSummaryRow('Subtotal', '₦${cart.subtotal.toStringAsFixed(0)}'),
           const SizedBox(height: 10),
           _buildSummaryRow(
-            'Delivery fee',
-            '₦${cart.deliveryFee.toStringAsFixed(0)}',
+            'Service charge (3%)',
+            '₦${cart.serviceCharge.toStringAsFixed(0)}',
           ),
           const SizedBox(height: 10),
           _buildSummaryRow(
-            'Rider incentive',
-            '₦150',
+            'Delivery (picker fee)',
+            '₦${cart.riderIncentive.toStringAsFixed(0)}',
             subtitle: 'Goes directly to your rider',
           ),
           const Padding(

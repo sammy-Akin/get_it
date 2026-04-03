@@ -6,8 +6,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import '../../core/theme.dart';
 
-class PickerEarningsScreen extends StatelessWidget {
-  const PickerEarningsScreen({super.key});
+class VendorEarningsScreen extends StatelessWidget {
+  const VendorEarningsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -29,37 +29,47 @@ class PickerEarningsScreen extends StatelessWidget {
       ),
       body: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance
-            .collection('getit_riders')
+            .collection('getit_vendors')
             .doc(uid)
             .snapshots(),
-        builder: (context, riderSnap) {
-          final riderData =
-              riderSnap.data?.data() as Map<String, dynamic>? ?? {};
+        builder: (context, vendorSnap) {
+          final vendorData =
+              vendorSnap.data?.data() as Map<String, dynamic>? ?? {};
           final totalEarnings =
-              (riderData['totalEarnings'] as num?)?.toDouble() ?? 0;
+              (vendorData['totalEarnings'] as num?)?.toDouble() ?? 0;
           final withdrawnAmount =
-              (riderData['withdrawnAmount'] as num?)?.toDouble() ?? 0;
+              (vendorData['withdrawnAmount'] as num?)?.toDouble() ?? 0;
           final availableBalance = totalEarnings - withdrawnAmount;
-          final bankAccount = riderData['bankAccount'] as Map<String, dynamic>?;
+          final bankAccount =
+              vendorData['bankAccount'] as Map<String, dynamic>?;
 
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('getit_orders')
-                .where('riderId', isEqualTo: uid)
+                .where('status', isEqualTo: 'delivered')
                 .snapshots(),
             builder: (context, ordersSnap) {
-              final docs = ordersSnap.data?.docs ?? [];
-              final delivered = docs
-                  .where((d) => (d.data() as Map)['status'] == 'delivered')
-                  .toList();
-              final pending = docs
-                  .where((d) => (d.data() as Map)['status'] != 'delivered')
-                  .toList();
+              final allDocs = ordersSnap.data?.docs ?? [];
+
+              // Filter orders that contain this vendor
+              final myOrders = allDocs.where((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final shops = data['shops'] as Map<String, dynamic>? ?? {};
+                return shops.containsKey(uid);
+              }).toList();
+
+              // Sort by date
+              myOrders.sort((a, b) {
+                final aT = (a.data() as Map)['createdAt'] as Timestamp?;
+                final bT = (b.data() as Map)['createdAt'] as Timestamp?;
+                if (aT == null || bT == null) return 0;
+                return bT.compareTo(aT);
+              });
 
               return ListView(
                 padding: const EdgeInsets.all(16),
                 children: [
-                  // ── Earnings card ────────────────────────────────
+                  // ── Earnings Card ───────────────────────────────────
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
@@ -108,13 +118,12 @@ class PickerEarningsScreen extends StatelessWidget {
                             ),
                             const SizedBox(width: 24),
                             _EarningStat(
-                              label: 'In Progress',
-                              value: '${pending.length}',
+                              label: 'Orders',
+                              value: '${myOrders.length}',
                             ),
                           ],
                         ),
                         const SizedBox(height: 20),
-                        // Withdraw button
                         GestureDetector(
                           onTap: availableBalance < 100
                               ? null
@@ -156,24 +165,24 @@ class PickerEarningsScreen extends StatelessWidget {
 
                   const SizedBox(height: 16),
 
-                  // Bank account card
+                  // ── Bank Account Card ───────────────────────────────
                   _buildBankAccountCard(context, uid, bankAccount),
 
                   const SizedBox(height: 16),
 
-                  // Stats
+                  // ── Stats ───────────────────────────────────────────
                   Row(
                     children: [
                       _StatCard(
                         label: 'Completed',
-                        value: '${delivered.length}',
-                        icon: Icons.delivery_dining_rounded,
+                        value: '${myOrders.length}',
+                        icon: Icons.receipt_long_rounded,
                         color: AppTheme.primary,
                       ),
                       const SizedBox(width: 12),
                       _StatCard(
                         label: 'This Week',
-                        value: '₦${_weeklyEarnings(delivered)}',
+                        value: '₦${_weeklyEarnings(myOrders, uid)}',
                         icon: Icons.calendar_today_rounded,
                         color: AppTheme.success,
                       ),
@@ -183,7 +192,7 @@ class PickerEarningsScreen extends StatelessWidget {
                   const SizedBox(height: 24),
 
                   const Text(
-                    'Delivery History',
+                    'Order History',
                     style: TextStyle(
                       color: AppTheme.textPrimary,
                       fontSize: 16,
@@ -193,7 +202,7 @@ class PickerEarningsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
 
-                  if (docs.isEmpty)
+                  if (myOrders.isEmpty)
                     const Center(
                       child: Padding(
                         padding: EdgeInsets.only(top: 40),
@@ -206,7 +215,7 @@ class PickerEarningsScreen extends StatelessWidget {
                             ),
                             SizedBox(height: 12),
                             Text(
-                              'No deliveries yet',
+                              'No completed orders yet',
                               style: TextStyle(
                                 color: AppTheme.textSecondary,
                                 fontFamily: 'Poppins',
@@ -217,18 +226,18 @@ class PickerEarningsScreen extends StatelessWidget {
                       ),
                     ),
 
-                  ...docs.map((doc) {
+                  ...myOrders.map((doc) {
                     final data = doc.data() as Map<String, dynamic>;
-                    final status = data['status'] ?? '';
-                    final isDelivered = status == 'delivered';
                     final createdAt = data['createdAt'] as Timestamp?;
                     final shops = data['shops'] as Map<String, dynamic>? ?? {};
-                    final shopNames = shops.values
-                        .map(
-                          (s) =>
-                              (s as Map<String, dynamic>)['shopName'] ?? 'Shop',
-                        )
-                        .join(', ');
+                    final myShop = shops[uid] as Map<String, dynamic>? ?? {};
+                    final items = myShop['items'] as List<dynamic>? ?? [];
+
+                    double myTotal = 0;
+                    for (final item in items) {
+                      myTotal +=
+                          (item as Map<String, dynamic>)['totalPrice'] as num;
+                    }
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 10),
@@ -244,18 +253,12 @@ class PickerEarningsScreen extends StatelessWidget {
                             width: 44,
                             height: 44,
                             decoration: BoxDecoration(
-                              color: isDelivered
-                                  ? AppTheme.success.withOpacity(0.15)
-                                  : Colors.orange.withOpacity(0.15),
+                              color: AppTheme.success.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: Icon(
-                              isDelivered
-                                  ? Icons.check_circle_rounded
-                                  : Icons.delivery_dining_rounded,
-                              color: isDelivered
-                                  ? AppTheme.success
-                                  : Colors.orange,
+                            child: const Icon(
+                              Icons.check_circle_rounded,
+                              color: AppTheme.success,
                               size: 22,
                             ),
                           ),
@@ -273,16 +276,14 @@ class PickerEarningsScreen extends StatelessWidget {
                                     fontFamily: 'Poppins',
                                   ),
                                 ),
-                                if (shopNames.isNotEmpty)
-                                  Text(
-                                    shopNames,
-                                    style: const TextStyle(
-                                      color: AppTheme.textSecondary,
-                                      fontSize: 11,
-                                      fontFamily: 'Poppins',
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
+                                Text(
+                                  '${items.length} item${items.length == 1 ? '' : 's'}',
+                                  style: const TextStyle(
+                                    color: AppTheme.textSecondary,
+                                    fontSize: 11,
+                                    fontFamily: 'Poppins',
                                   ),
+                                ),
                                 if (createdAt != null)
                                   Text(
                                     _formatDate(createdAt.toDate()),
@@ -296,11 +297,9 @@ class PickerEarningsScreen extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            isDelivered ? '+₦150' : 'Pending',
-                            style: TextStyle(
-                              color: isDelivered
-                                  ? AppTheme.success
-                                  : Colors.orange,
+                            '+₦${myTotal.toStringAsFixed(0)}',
+                            style: const TextStyle(
+                              color: AppTheme.success,
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
                               fontFamily: 'Poppins',
@@ -421,7 +420,7 @@ class PickerEarningsScreen extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => _BankAccountSheet(uid: uid, existing: existing),
+      builder: (ctx) => _VendorBankAccountSheet(uid: uid, existing: existing),
     );
   }
 
@@ -448,7 +447,7 @@ class PickerEarningsScreen extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => _WithdrawSheet(
+      builder: (ctx) => _VendorWithdrawSheet(
         uid: uid,
         availableBalance: availableBalance,
         bankAccount: bankAccount,
@@ -456,16 +455,22 @@ class PickerEarningsScreen extends StatelessWidget {
     );
   }
 
-  String _weeklyEarnings(List<QueryDocumentSnapshot> delivered) {
+  String _weeklyEarnings(List<QueryDocumentSnapshot> orders, String uid) {
     final now = DateTime.now();
     final weekStart = now.subtract(Duration(days: now.weekday - 1));
-    final weekDeliveries = delivered.where((doc) {
+    double total = 0;
+    for (final doc in orders) {
       final data = doc.data() as Map<String, dynamic>;
-      final ts = data['deliveredAt'] as Timestamp?;
-      if (ts == null) return false;
-      return ts.toDate().isAfter(weekStart);
-    }).length;
-    return '${weekDeliveries * 150}';
+      final ts = data['createdAt'] as Timestamp?;
+      if (ts == null || ts.toDate().isBefore(weekStart)) continue;
+      final shops = data['shops'] as Map<String, dynamic>? ?? {};
+      final myShop = shops[uid] as Map<String, dynamic>? ?? {};
+      final items = myShop['items'] as List<dynamic>? ?? [];
+      for (final item in items) {
+        total += (item as Map<String, dynamic>)['totalPrice'] as num;
+      }
+    }
+    return total.toStringAsFixed(0);
   }
 
   String _formatDate(DateTime date) {
@@ -477,23 +482,23 @@ class PickerEarningsScreen extends StatelessWidget {
   }
 }
 
-// ─── Bank Account Sheet ───────────────────────────────────────────────────────
+// ─── Vendor Bank Account Sheet ────────────────────────────────────────────────
 
-class _BankAccountSheet extends StatefulWidget {
+class _VendorBankAccountSheet extends StatefulWidget {
   final String uid;
   final Map<String, dynamic>? existing;
 
-  const _BankAccountSheet({required this.uid, this.existing});
+  const _VendorBankAccountSheet({required this.uid, this.existing});
 
   @override
-  State<_BankAccountSheet> createState() => _BankAccountSheetState();
+  State<_VendorBankAccountSheet> createState() =>
+      _VendorBankAccountSheetState();
 }
 
-class _BankAccountSheetState extends State<_BankAccountSheet> {
+class _VendorBankAccountSheetState extends State<_VendorBankAccountSheet> {
   final _accountNumberCtrl = TextEditingController();
   final _bankSearchCtrl = TextEditingController();
 
-  // Bank list loaded from Paystack
   List<Map<String, String>> _banks = [];
   List<Map<String, String>> _filteredBanks = [];
   bool _isFetchingBanks = false;
@@ -509,15 +514,13 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
   @override
   void initState() {
     super.initState();
-    _fetchBanksFromPaystack();
-
+    _fetchBanks();
     if (widget.existing != null) {
       _accountNumberCtrl.text = widget.existing!['accountNumber'] ?? '';
       _selectedBankCode = widget.existing!['bankCode'];
       _selectedBankName = widget.existing!['bankName'];
       _resolvedAccountName = widget.existing!['accountName'];
     }
-
     _bankSearchCtrl.addListener(_filterBanks);
   }
 
@@ -528,31 +531,22 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
     super.dispose();
   }
 
-  /// Fetch the full Nigerian bank list directly from Paystack's public API.
-  /// No secret key is needed — this is a public endpoint.
-  Future<void> _fetchBanksFromPaystack() async {
+  Future<void> _fetchBanks() async {
     setState(() => _isFetchingBanks = true);
-
     try {
       final response = await http.get(
         Uri.parse('https://api.paystack.co/bank?country=nigeria&perPage=100'),
-        headers: {'Content-Type': 'application/json'},
       );
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         final List bankList = data['data'] as List;
-
         final parsed = bankList
             .where((b) => b['active'] == true && b['is_deleted'] == false)
             .map<Map<String, String>>(
               (b) => {'name': b['name'] as String, 'code': b['code'] as String},
             )
             .toList();
-
-        // Sort alphabetically
         parsed.sort((a, b) => a['name']!.compareTo(b['name']!));
-
         if (mounted) {
           setState(() {
             _banks = parsed;
@@ -561,22 +555,20 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
           });
         }
       } else {
-        // Fall back to a minimal hardcoded list if fetch fails
-        _useFallbackBanks();
+        _useFallback();
       }
-    } catch (e) {
-      _useFallbackBanks();
+    } catch (_) {
+      _useFallback();
     }
   }
 
-  void _useFallbackBanks() {
+  void _useFallback() {
     final fallback = [
       {'name': 'Access Bank', 'code': '044'},
       {'name': 'GTBank', 'code': '058'},
       {'name': 'First Bank', 'code': '011'},
       {'name': 'Zenith Bank', 'code': '057'},
       {'name': 'UBA', 'code': '033'},
-      {'name': 'Fidelity Bank', 'code': '070'},
       {'name': 'Kuda Bank', 'code': '50211'},
       {'name': 'OPay', 'code': '100004'},
       {'name': 'PalmPay', 'code': '100033'},
@@ -600,22 +592,18 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
     });
   }
 
-  /// Called automatically when 10 digits are entered AND a bank is selected.
   Future<void> _resolveAccount() async {
     if (_selectedBankCode == null || _accountNumberCtrl.text.length != 10) {
       setState(
-        () =>
-            _error = 'Select a bank and enter a valid 10-digit account number',
+        () => _error = 'Select a bank and enter a 10-digit account number',
       );
       return;
     }
-
     setState(() {
       _isResolving = true;
       _error = null;
       _resolvedAccountName = null;
     });
-
     try {
       final response = await http.post(
         Uri.parse(
@@ -627,7 +615,6 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
           'bankCode': _selectedBankCode,
         }),
       );
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         setState(() {
@@ -640,7 +627,7 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
           _isResolving = false;
         });
       }
-    } catch (e) {
+    } catch (_) {
       setState(() {
         _error = 'Network error. Try again.';
         _isResolving = false;
@@ -648,17 +635,15 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
     }
   }
 
-  Future<void> _saveBankAccount() async {
+  Future<void> _save() async {
     if (_resolvedAccountName == null) {
       setState(() => _error = 'Please verify your account first');
       return;
     }
-
     setState(() => _isSaving = true);
-
     try {
       await FirebaseFirestore.instance
-          .collection('getit_riders')
+          .collection('getit_vendors')
           .doc(widget.uid)
           .update({
             'bankAccount': {
@@ -668,9 +653,8 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
               'accountName': _resolvedAccountName,
             },
           });
-
       if (mounted) Navigator.pop(context);
-    } catch (e) {
+    } catch (_) {
       setState(() {
         _error = 'Failed to save. Try again.';
         _isSaving = false;
@@ -691,7 +675,6 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Handle bar
           Center(
             child: Container(
               width: 40,
@@ -703,7 +686,6 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
             ),
           ),
           const SizedBox(height: 20),
-
           const Text(
             'Bank Account',
             style: TextStyle(
@@ -724,7 +706,7 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
           ),
           const SizedBox(height: 20),
 
-          // ── Bank Selector ──────────────────────────────────────────
+          // Bank selector
           if (_isFetchingBanks)
             Container(
               padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
@@ -734,7 +716,7 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
                 border: Border.all(color: AppTheme.cardBorder),
               ),
               child: Row(
-                children: [
+                children: const [
                   SizedBox(
                     width: 16,
                     height: 16,
@@ -743,9 +725,9 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
                       color: AppTheme.primary,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  const Text(
-                    'Loading banks from Paystack…',
+                  SizedBox(width: 12),
+                  Text(
+                    'Loading banks…',
                     style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontFamily: 'Poppins',
@@ -756,7 +738,6 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
               ),
             )
           else ...[
-            // Tappable bank selector
             GestureDetector(
               onTap: () => setState(() => _showBankSearch = !_showBankSearch),
               child: Container(
@@ -804,8 +785,6 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
                 ),
               ),
             ),
-
-            // Expandable bank search + list
             if (_showBankSearch) ...[
               const SizedBox(height: 8),
               Container(
@@ -814,18 +793,10 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
                   color: AppTheme.surface,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: AppTheme.cardBorder),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.08),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Search field
                     Padding(
                       padding: const EdgeInsets.all(10),
                       child: TextField(
@@ -858,7 +829,7 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(
+                            borderSide: const BorderSide(
                               color: AppTheme.primary,
                               width: 1.5,
                             ),
@@ -867,80 +838,65 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
                       ),
                     ),
                     const Divider(height: 1, color: AppTheme.divider),
-                    // Bank list
                     Flexible(
-                      child: _filteredBanks.isEmpty
-                          ? const Padding(
-                              padding: EdgeInsets.all(16),
-                              child: Text(
-                                'No banks found',
-                                style: TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontFamily: 'Poppins',
-                                  fontSize: 13,
-                                ),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        itemCount: _filteredBanks.length,
+                        itemBuilder: (context, index) {
+                          final bank = _filteredBanks[index];
+                          final isSelected = bank['code'] == _selectedBankCode;
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _selectedBankCode = bank['code'];
+                                _selectedBankName = bank['name'];
+                                _showBankSearch = false;
+                                _resolvedAccountName = null;
+                                _bankSearchCtrl.clear();
+                                _error = null;
+                              });
+                              if (_accountNumberCtrl.text.length == 10) {
+                                _resolveAccount();
+                              }
+                            },
+                            child: Container(
+                              color: isSelected
+                                  ? AppTheme.primary.withOpacity(0.08)
+                                  : Colors.transparent,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
                               ),
-                            )
-                          : ListView.builder(
-                              shrinkWrap: true,
-                              padding: EdgeInsets.zero,
-                              itemCount: _filteredBanks.length,
-                              itemBuilder: (context, index) {
-                                final bank = _filteredBanks[index];
-                                final isSelected =
-                                    bank['code'] == _selectedBankCode;
-                                return GestureDetector(
-                                  onTap: () {
-                                    setState(() {
-                                      _selectedBankCode = bank['code'];
-                                      _selectedBankName = bank['name'];
-                                      _showBankSearch = false;
-                                      _resolvedAccountName = null;
-                                      _bankSearchCtrl.clear();
-                                      _error = null;
-                                    });
-                                    // Auto-resolve if account number already filled
-                                    if (_accountNumberCtrl.text.length == 10) {
-                                      _resolveAccount();
-                                    }
-                                  },
-                                  child: Container(
-                                    color: isSelected
-                                        ? AppTheme.primary.withOpacity(0.08)
-                                        : Colors.transparent,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 12,
-                                    ),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            bank['name']!,
-                                            style: TextStyle(
-                                              color: isSelected
-                                                  ? AppTheme.primary
-                                                  : AppTheme.textPrimary,
-                                              fontFamily: 'Poppins',
-                                              fontSize: 13,
-                                              fontWeight: isSelected
-                                                  ? FontWeight.w600
-                                                  : FontWeight.normal,
-                                            ),
-                                          ),
-                                        ),
-                                        if (isSelected)
-                                          const Icon(
-                                            Icons.check_rounded,
-                                            color: AppTheme.primary,
-                                            size: 16,
-                                          ),
-                                      ],
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      bank['name']!,
+                                      style: TextStyle(
+                                        color: isSelected
+                                            ? AppTheme.primary
+                                            : AppTheme.textPrimary,
+                                        fontFamily: 'Poppins',
+                                        fontSize: 13,
+                                        fontWeight: isSelected
+                                            ? FontWeight.w600
+                                            : FontWeight.normal,
+                                      ),
                                     ),
                                   ),
-                                );
-                              },
+                                  if (isSelected)
+                                    const Icon(
+                                      Icons.check_rounded,
+                                      color: AppTheme.primary,
+                                      size: 16,
+                                    ),
+                                ],
+                              ),
                             ),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
@@ -950,7 +906,7 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
 
           const SizedBox(height: 12),
 
-          // ── Account Number ─────────────────────────────────────────
+          // Account number
           TextField(
             controller: _accountNumberCtrl,
             keyboardType: TextInputType.number,
@@ -989,18 +945,16 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
                   : null,
             ),
             onChanged: (value) {
-              // Clear previous resolution on change
               if (_resolvedAccountName != null) {
                 setState(() => _resolvedAccountName = null);
               }
-              // Auto-resolve once 10 digits entered and bank is selected
               if (value.length == 10 && _selectedBankCode != null) {
                 _resolveAccount();
               }
             },
           ),
 
-          // ── Resolved Account Name ──────────────────────────────────
+          // Resolved name
           AnimatedSwitcher(
             duration: const Duration(milliseconds: 300),
             child: _resolvedAccountName != null
@@ -1055,7 +1009,6 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
                 : const SizedBox.shrink(key: ValueKey('empty')),
           ),
 
-          // ── Error ──────────────────────────────────────────────────
           if (_error != null) ...[
             const SizedBox(height: 8),
             Row(
@@ -1083,9 +1036,7 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
           const SizedBox(height: 20),
 
           ElevatedButton(
-            onPressed: _isSaving || _resolvedAccountName == null
-                ? null
-                : _saveBankAccount,
+            onPressed: _isSaving || _resolvedAccountName == null ? null : _save,
             child: _isSaving
                 ? const SizedBox(
                     width: 20,
@@ -1106,24 +1057,24 @@ class _BankAccountSheetState extends State<_BankAccountSheet> {
   }
 }
 
-// ─── Withdraw Sheet ───────────────────────────────────────────────────────────
+// ─── Vendor Withdraw Sheet ────────────────────────────────────────────────────
 
-class _WithdrawSheet extends StatefulWidget {
+class _VendorWithdrawSheet extends StatefulWidget {
   final String uid;
   final double availableBalance;
   final Map<String, dynamic> bankAccount;
 
-  const _WithdrawSheet({
+  const _VendorWithdrawSheet({
     required this.uid,
     required this.availableBalance,
     required this.bankAccount,
   });
 
   @override
-  State<_WithdrawSheet> createState() => _WithdrawSheetState();
+  State<_VendorWithdrawSheet> createState() => _VendorWithdrawSheetState();
 }
 
-class _WithdrawSheetState extends State<_WithdrawSheet> {
+class _VendorWithdrawSheetState extends State<_VendorWithdrawSheet> {
   final _amountCtrl = TextEditingController();
   bool _isWithdrawing = false;
   String? _error;
@@ -1150,20 +1101,18 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
       setState(() => _error = 'Amount exceeds available balance');
       return;
     }
-
     setState(() {
       _isWithdrawing = true;
       _error = null;
     });
-
     try {
       final response = await http.post(
         Uri.parse(
-          'https://us-central1-getit-db879.cloudfunctions.net/withdrawEarnings',
+          'https://us-central1-getit-db879.cloudfunctions.net/withdrawVendorEarnings',
         ),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'pickerId': widget.uid,
+          'vendorId': widget.uid,
           'amount': amount,
           'accountNumber': widget.bankAccount['accountNumber'],
           'bankCode': widget.bankAccount['bankCode'],
@@ -1191,7 +1140,7 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
           _isWithdrawing = false;
         });
       }
-    } catch (e) {
+    } catch (_) {
       setState(() {
         _error = 'Network error. Try again.';
         _isWithdrawing = false;
@@ -1288,7 +1237,7 @@ class _WithdrawSheetState extends State<_WithdrawSheet> {
           ),
           const SizedBox(height: 16),
 
-          // Amount field
+          // Amount
           TextField(
             controller: _amountCtrl,
             keyboardType: TextInputType.number,

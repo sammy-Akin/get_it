@@ -5,12 +5,20 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import '../../services/auth_service.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  final _user = FirebaseAuth.instance.currentUser;
+  final _firestore = FirebaseFirestore.instance;
+
+  @override
   Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
+    final uid = _user?.uid ?? '';
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -33,100 +41,111 @@ class ProfileScreen extends StatelessWidget {
           ),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        children: [
-          // Profile header
-          _buildProfileHeader(user),
-          const SizedBox(height: 28),
+      body: StreamBuilder<DocumentSnapshot>(
+        stream: _firestore.collection('getit_users').doc(uid).snapshots(),
+        builder: (context, snapshot) {
+          final userData = snapshot.data?.data() as Map<String, dynamic>? ?? {};
 
-          // Account section
-          _buildSectionTitle('Account'),
-          const SizedBox(height: 12),
-          _buildMenuCard([
-            _MenuItem(
-              icon: Icons.person_outline_rounded,
-              label: 'Edit Profile',
-              onTap: () => _showEditProfileSheet(context, user),
-            ),
-            _MenuItem(
-              icon: Icons.location_on_outlined,
-              label: 'Saved Addresses',
-              onTap: () => _showAddressesSheet(context, user?.uid),
-            ),
-            _MenuItem(
-              icon: Icons.notifications_outlined,
-              label: 'Notifications',
-              onTap: () {},
-            ),
-          ]),
+          return ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            children: [
+              _buildProfileHeader(userData),
+              const SizedBox(height: 20),
 
-          const SizedBox(height: 24),
+              // Stats row
+              _buildStatsRow(uid),
+              const SizedBox(height: 24),
 
-          // Orders section
-          _buildSectionTitle('Orders'),
-          const SizedBox(height: 12),
-          _buildMenuCard([
-            _MenuItem(
-              icon: Icons.receipt_long_outlined,
-              label: 'Order History',
-              onTap: () => context.push('/orders'),
-            ),
-            _MenuItem(
-              icon: Icons.delivery_dining_outlined,
-              label: 'Active Orders',
-              onTap: () => context.push('/orders'),
-            ),
-          ]),
+              // Delivery address
+              _buildDeliveryAddress(userData),
+              const SizedBox(height: 24),
 
-          const SizedBox(height: 24),
+              // Account
+              _buildSectionTitle('Account'),
+              const SizedBox(height: 12),
+              _buildMenuCard([
+                _MenuItem(
+                  icon: Icons.person_outline_rounded,
+                  label: 'Edit Profile',
+                  onTap: () => _showEditProfileSheet(userData),
+                ),
+                _MenuItem(
+                  icon: Icons.phone_outlined,
+                  label: 'Phone Number',
+                  subtitle: userData['phone'] ?? 'Not set',
+                  onTap: () => _showPhoneSheet(userData),
+                ),
+                _MenuItem(
+                  icon: Icons.notifications_outlined,
+                  label: 'Notifications',
+                  onTap: () {},
+                ),
+              ]),
 
-          // Support section
-          _buildSectionTitle('Support'),
-          const SizedBox(height: 12),
-          _buildMenuCard([
-            _MenuItem(
-              icon: Icons.help_outline_rounded,
-              label: 'Help & FAQ',
-              onTap: () {},
-            ),
-            _MenuItem(
-              icon: Icons.chat_bubble_outline_rounded,
-              label: 'Contact Support',
-              onTap: () {},
-            ),
-            _MenuItem(
-              icon: Icons.info_outline_rounded,
-              label: 'About Get It',
-              onTap: () => _showAboutDialog(context),
-            ),
-          ]),
+              const SizedBox(height: 24),
 
-          const SizedBox(height: 24),
+              // Orders
+              _buildSectionTitle('Orders'),
+              const SizedBox(height: 12),
+              _buildMenuCard([
+                _MenuItem(
+                  icon: Icons.receipt_long_outlined,
+                  label: 'Order History',
+                  onTap: () => context.push('/orders'),
+                ),
+                _MenuItem(
+                  icon: Icons.delivery_dining_outlined,
+                  label: 'Active Orders',
+                  onTap: () => context.push('/orders'),
+                ),
+              ]),
 
-          // Sign out
-          _buildSignOutButton(context),
+              const SizedBox(height: 24),
 
-          const SizedBox(height: 32),
+              // Support
+              _buildSectionTitle('Support'),
+              const SizedBox(height: 12),
+              _buildMenuCard([
+                _MenuItem(
+                  icon: Icons.help_outline_rounded,
+                  label: 'Help & FAQ',
+                  onTap: () {},
+                ),
+                _MenuItem(
+                  icon: Icons.info_outline_rounded,
+                  label: 'About Get It',
+                  onTap: () => _showAboutDialog(),
+                ),
+              ]),
 
-          // App version
-          const Center(
-            child: Text(
-              'Get It v1.0.0',
-              style: TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12,
-                fontFamily: 'Poppins',
+              const SizedBox(height: 24),
+
+              _buildSignOutButton(),
+              const SizedBox(height: 24),
+
+              const Center(
+                child: Text(
+                  'Get It v1.0.0',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                    fontFamily: 'Poppins',
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
+              const SizedBox(height: 16),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildProfileHeader(User? user) {
+  Widget _buildProfileHeader(Map<String, dynamic> userData) {
+    final name = _user?.displayName ?? userData['fullName'] ?? 'User';
+    final email = _user?.email ?? '';
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -148,25 +167,24 @@ class ProfileScreen extends StatelessWidget {
                 width: 2,
               ),
             ),
-            child: user?.photoURL != null
+            child: _user?.photoURL != null
                 ? ClipOval(
                     child: Image.network(
-                      user!.photoURL!,
+                      _user!.photoURL!,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => _buildAvatarFallback(user),
+                      errorBuilder: (_, __, ___) => _avatarInitial(initial),
                     ),
                   )
-                : _buildAvatarFallback(user),
+                : _avatarInitial(initial),
           ),
           const SizedBox(width: 16),
 
-          // User info
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  user?.displayName ?? 'User',
+                  name,
                   style: const TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 18,
@@ -176,7 +194,7 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  user?.email ?? '',
+                  email,
                   style: const TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 13,
@@ -206,14 +224,30 @@ class ProfileScreen extends StatelessWidget {
               ],
             ),
           ),
+
+          // Edit icon
+          GestureDetector(
+            onTap: () => _showEditProfileSheet({}),
+            child: Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceLight,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.edit_outlined,
+                color: AppTheme.textSecondary,
+                size: 16,
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildAvatarFallback(User? user) {
-    final name = user?.displayName ?? 'U';
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : 'U';
+  Widget _avatarInitial(String initial) {
     return Center(
       child: Text(
         initial,
@@ -223,6 +257,126 @@ class ProfileScreen extends StatelessWidget {
           fontWeight: FontWeight.bold,
           fontFamily: 'Poppins',
         ),
+      ),
+    );
+  }
+
+  Widget _buildStatsRow(String uid) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('getit_orders')
+          .where('customerId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        final orders = snapshot.data?.docs ?? [];
+        final totalOrders = orders.length;
+        final delivered = orders
+            .where((d) => (d.data() as Map)['status'] == 'delivered')
+            .length;
+        final totalSpent = orders.fold<double>(0, (sum, d) {
+          final data = d.data() as Map<String, dynamic>;
+          if (data['status'] == 'delivered') {
+            return sum + ((data['total'] as num?)?.toDouble() ?? 0);
+          }
+          return sum;
+        });
+
+        return Row(
+          children: [
+            _StatCard(
+              value: '$totalOrders',
+              label: 'Total Orders',
+              icon: Icons.receipt_long_rounded,
+              color: AppTheme.primary,
+            ),
+            const SizedBox(width: 10),
+            _StatCard(
+              value: '$delivered',
+              label: 'Delivered',
+              icon: Icons.check_circle_rounded,
+              color: AppTheme.success,
+            ),
+            const SizedBox(width: 10),
+            _StatCard(
+              value: '₦${totalSpent.toStringAsFixed(0)}',
+              label: 'Total Spent',
+              icon: Icons.payments_rounded,
+              color: Colors.orange,
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildDeliveryAddress(Map<String, dynamic> userData) {
+    final address = userData['deliveryAddress'] as String?;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.cardBorder),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.location_on_rounded,
+              color: AppTheme.primary,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Delivery Address',
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 11,
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  address ?? 'Not set — tap to update',
+                  style: TextStyle(
+                    color: address != null
+                        ? AppTheme.textPrimary
+                        : AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    fontFamily: 'Poppins',
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: () => context.go('/home'),
+            child: const Text(
+              'Change',
+              style: TextStyle(
+                color: AppTheme.primary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'Poppins',
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -251,7 +405,6 @@ class ProfileScreen extends StatelessWidget {
         children: List.generate(items.length, (index) {
           final item = items[index];
           final isLast = index == items.length - 1;
-
           return Column(
             children: [
               GestureDetector(
@@ -279,13 +432,27 @@ class ProfileScreen extends StatelessWidget {
                       ),
                       const SizedBox(width: 14),
                       Expanded(
-                        child: Text(
-                          item.label,
-                          style: const TextStyle(
-                            color: AppTheme.textPrimary,
-                            fontSize: 14,
-                            fontFamily: 'Poppins',
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.label,
+                              style: const TextStyle(
+                                color: AppTheme.textPrimary,
+                                fontSize: 14,
+                                fontFamily: 'Poppins',
+                              ),
+                            ),
+                            if (item.subtitle != null)
+                              Text(
+                                item.subtitle!,
+                                style: const TextStyle(
+                                  color: AppTheme.textSecondary,
+                                  fontSize: 12,
+                                  fontFamily: 'Poppins',
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                       const Icon(
@@ -306,9 +473,9 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSignOutButton(BuildContext context) {
+  Widget _buildSignOutButton() {
     return GestureDetector(
-      onTap: () => _confirmSignOut(context),
+      onTap: _confirmSignOut,
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -336,10 +503,10 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  void _confirmSignOut(BuildContext context) {
+  void _confirmSignOut() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text(
@@ -359,7 +526,7 @@ class ProfileScreen extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(ctx),
             child: const Text(
               'Cancel',
               style: TextStyle(
@@ -370,9 +537,9 @@ class ProfileScreen extends StatelessWidget {
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(ctx);
               await AuthService().signOut();
-              if (context.mounted) context.go('/login');
+              if (mounted) context.go('/login');
             },
             child: const Text(
               'Sign Out',
@@ -388,8 +555,10 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  void _showEditProfileSheet(BuildContext context, User? user) {
-    final nameController = TextEditingController(text: user?.displayName ?? '');
+  void _showEditProfileSheet(Map<String, dynamic> userData) {
+    final nameCtrl = TextEditingController(
+      text: _user?.displayName ?? userData['fullName'] ?? '',
+    );
 
     showModalBottomSheet(
       context: context,
@@ -398,12 +567,12 @@ class ProfileScreen extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => Padding(
+      builder: (ctx) => Padding(
         padding: EdgeInsets.fromLTRB(
           24,
           16,
           24,
-          MediaQuery.of(context).viewInsets.bottom + 32,
+          MediaQuery.of(ctx).viewInsets.bottom + 32,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -431,7 +600,7 @@ class ProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             TextField(
-              controller: nameController,
+              controller: nameCtrl,
               style: const TextStyle(
                 color: AppTheme.textPrimary,
                 fontFamily: 'Poppins',
@@ -447,12 +616,12 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () async {
-                await user?.updateDisplayName(nameController.text.trim());
-                await FirebaseFirestore.instance
+                await _user?.updateDisplayName(nameCtrl.text.trim());
+                await _firestore
                     .collection('getit_users')
-                    .doc(user?.uid)
-                    .update({'fullName': nameController.text.trim()});
-                if (context.mounted) Navigator.pop(context);
+                    .doc(_user?.uid)
+                    .update({'fullName': nameCtrl.text.trim()});
+                if (ctx.mounted) Navigator.pop(ctx);
               },
               child: const Text('Save Changes'),
             ),
@@ -462,9 +631,8 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  void _showAddressesSheet(BuildContext context, String? uid) {
-    if (uid == null) return;
-    final addressController = TextEditingController();
+  void _showPhoneSheet(Map<String, dynamic> userData) {
+    final phoneCtrl = TextEditingController(text: userData['phone'] ?? '');
 
     showModalBottomSheet(
       context: context,
@@ -473,12 +641,12 @@ class ProfileScreen extends StatelessWidget {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (context) => Padding(
+      builder: (ctx) => Padding(
         padding: EdgeInsets.fromLTRB(
           24,
           16,
           24,
-          MediaQuery.of(context).viewInsets.bottom + 32,
+          MediaQuery.of(ctx).viewInsets.bottom + 32,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -496,7 +664,7 @@ class ProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             const Text(
-              'Saved Addresses',
+              'Phone Number',
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 fontSize: 18,
@@ -504,115 +672,41 @@ class ProfileScreen extends StatelessWidget {
                 fontFamily: 'Poppins',
               ),
             ),
-            const SizedBox(height: 16),
-
-            // Existing addresses
-            StreamBuilder<DocumentSnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('getit_users')
-                  .doc(uid)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                final addresses =
-                    (snapshot.data?.data()
-                            as Map<String, dynamic>?)?['addresses']
-                        as List<dynamic>?;
-
-                if (addresses == null || addresses.isEmpty) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      'No saved addresses yet',
-                      style: TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontFamily: 'Poppins',
-                      ),
-                    ),
-                  );
-                }
-
-                return Column(
-                  children: addresses.map((addr) {
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceLight,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.location_on_outlined,
-                            color: AppTheme.primary,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              addr.toString(),
-                              style: const TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 13,
-                                fontFamily: 'Poppins',
-                              ),
-                            ),
-                          ),
-                          GestureDetector(
-                            onTap: () async {
-                              final list = List<dynamic>.from(addresses)
-                                ..remove(addr);
-                              await FirebaseFirestore.instance
-                                  .collection('getit_users')
-                                  .doc(uid)
-                                  .update({'addresses': list});
-                            },
-                            child: const Icon(
-                              Icons.close,
-                              color: AppTheme.textSecondary,
-                              size: 16,
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
+            const SizedBox(height: 6),
+            const Text(
+              'Used by riders to contact you',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+                fontFamily: 'Poppins',
+              ),
             ),
-
-            const SizedBox(height: 12),
-
-            // Add new address
+            const SizedBox(height: 20),
             TextField(
-              controller: addressController,
+              controller: phoneCtrl,
+              keyboardType: TextInputType.phone,
               style: const TextStyle(
                 color: AppTheme.textPrimary,
                 fontFamily: 'Poppins',
               ),
               decoration: const InputDecoration(
-                hintText: 'Add new address',
+                hintText: '080xxxxxxxx',
                 prefixIcon: Icon(
-                  Icons.add_location_outlined,
+                  Icons.phone_outlined,
                   color: AppTheme.textSecondary,
                 ),
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () async {
-                if (addressController.text.trim().isEmpty) return;
-                await FirebaseFirestore.instance
+                await _firestore
                     .collection('getit_users')
-                    .doc(uid)
-                    .update({
-                      'addresses': FieldValue.arrayUnion([
-                        addressController.text.trim(),
-                      ]),
-                    });
-                addressController.clear();
+                    .doc(_user?.uid)
+                    .update({'phone': phoneCtrl.text.trim()});
+                if (ctx.mounted) Navigator.pop(ctx);
               },
-              child: const Text('Add Address'),
+              child: const Text('Save'),
             ),
           ],
         ),
@@ -620,10 +714,10 @@ class ProfileScreen extends StatelessWidget {
     );
   }
 
-  void _showAboutDialog(BuildContext context) {
+  void _showAboutDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Column(
@@ -654,7 +748,7 @@ class ProfileScreen extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Hyperlocal delivery for estate residents.\nOrder from shops around you and get delivered to your door.',
+              'Hyperlocal delivery for estate residents.\nOrder from shops within a 10-minute walk and get delivered to your door.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
                 fontSize: 13,
@@ -676,7 +770,7 @@ class ProfileScreen extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(ctx),
             child: const Text(
               'Close',
               style: TextStyle(color: AppTheme.primary, fontFamily: 'Poppins'),
@@ -688,14 +782,81 @@ class ProfileScreen extends StatelessWidget {
   }
 }
 
+// ── Stat Card ──────────────────────────────────────────────────────────────────
+
+class _StatCard extends StatelessWidget {
+  final String value;
+  final String label;
+  final IconData icon;
+  final Color color;
+
+  const _StatCard({
+    required this.value,
+    required this.label,
+    required this.icon,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppTheme.cardBorder),
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(icon, color: color, size: 18),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: const TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 15,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Poppins',
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 10,
+                fontFamily: 'Poppins',
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Menu Item ──────────────────────────────────────────────────────────────────
+
 class _MenuItem {
   final IconData icon;
   final String label;
+  final String? subtitle;
   final VoidCallback onTap;
 
   const _MenuItem({
     required this.icon,
     required this.label,
+    this.subtitle,
     required this.onTap,
   });
 }

@@ -4,6 +4,9 @@
         "firestore",
         "geolocator",
         "getit",
-        "Hyperlocal"
+        "Hyperlocal",
+        "paystack",
+        "placemarks",
+        "Qfifks"
     ]
 }

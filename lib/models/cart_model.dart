@@ -13,20 +13,25 @@ class CartModel {
   final Map<String, CartItem> _items = {};
 
   Map<String, CartItem> get items => Map.unmodifiable(_items);
-
   List<CartItem> get itemList => _items.values.toList();
-
   int get totalItems =>
       _items.values.fold(0, (sum, item) => sum + item.quantity);
-
   double get subtotal =>
       _items.values.fold(0, (sum, item) => sum + item.totalPrice);
 
-  double get deliveryFee => _items.isEmpty ? 0 : 300;
+  // 3% service charge on subtotal
+  double get serviceCharge =>
+      double.parse((subtotal * 0.03).toStringAsFixed(2));
 
-  double get total => subtotal + deliveryFee;
+  // No separate delivery fee — picker incentive covers delivery
+  double get deliveryFee => 0;
 
-  // Group items by shop
+  // ₦150 picker incentive — this IS the delivery cost
+  double get riderIncentive => _items.isEmpty ? 0 : 150;
+
+  double get total =>
+      _items.isEmpty ? 0 : subtotal + serviceCharge + riderIncentive;
+
   Map<String, List<CartItem>> get itemsByShop {
     final Map<String, List<CartItem>> grouped = {};
     for (final item in _items.values) {
@@ -57,17 +62,8 @@ class CartModel {
     }
   }
 
-  void deleteItem(String productId) {
-    _items.remove(productId);
-  }
-
-  void clear() {
-    _items.clear();
-  }
-
-  int getQuantity(String productId) {
-    return _items[productId]?.quantity ?? 0;
-  }
-
+  void deleteItem(String productId) => _items.remove(productId);
+  void clear() => _items.clear();
+  int getQuantity(String productId) => _items[productId]?.quantity ?? 0;
   bool contains(String productId) => _items.containsKey(productId);
 }

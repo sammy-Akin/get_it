@@ -16,6 +16,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
+  final _locationController = TextEditingController();
   final _authService = AuthService();
 
   String _selectedRole = 'customer';
@@ -50,6 +51,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
+    _locationController.dispose();
     super.dispose();
   }
 
@@ -63,6 +65,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: _passwordController.text,
         fullName: _nameController.text.trim(),
         role: _selectedRole,
+        businessName: _selectedRole == 'vendor'
+            ? _nameController.text.trim()
+            : null,
+        location: _selectedRole == 'vendor' || _selectedRole == 'picker'
+            ? _locationController.text.trim()
+            : null,
       );
       if (mounted) {
         if (_selectedRole == 'vendor') {
@@ -206,12 +214,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
               const SizedBox(height: 28),
 
-              // Form
               Form(
                 key: _formKey,
                 child: Column(
                   children: [
-                    // Full name
+                    // Name field — changes label based on role
                     TextFormField(
                       controller: _nameController,
                       keyboardType: TextInputType.name,
@@ -220,22 +227,58 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         color: AppTheme.textPrimary,
                         fontFamily: 'Poppins',
                       ),
-                      decoration: const InputDecoration(
-                        hintText: 'Full name',
+                      decoration: InputDecoration(
+                        hintText: _selectedRole == 'vendor'
+                            ? 'Business / Shop name'
+                            : 'Full name',
                         prefixIcon: Icon(
-                          Icons.person_outline_rounded,
+                          _selectedRole == 'vendor'
+                              ? Icons.storefront_rounded
+                              : Icons.person_outline_rounded,
                           color: AppTheme.textSecondary,
                         ),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty)
-                          return 'Please enter your full name';
-                        if (value.trim().length < 2) return 'Name is too short';
+                      validator: (v) {
+                        if (v == null || v.isEmpty)
+                          return _selectedRole == 'vendor'
+                              ? 'Please enter your business name'
+                              : 'Please enter your full name';
+                        if (v.trim().length < 2) return 'Name is too short';
                         return null;
                       },
                     ),
 
                     const SizedBox(height: 14),
+
+                    // Location (vendor + picker only)
+                    if (_selectedRole == 'vendor' ||
+                        _selectedRole == 'picker') ...[
+                      TextFormField(
+                        controller: _locationController,
+                        keyboardType: TextInputType.streetAddress,
+                        style: const TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontFamily: 'Poppins',
+                        ),
+                        decoration: InputDecoration(
+                          hintText: _selectedRole == 'vendor'
+                              ? 'Shop location / Estate'
+                              : 'Your location / Estate',
+                          prefixIcon: const Icon(
+                            Icons.location_on_outlined,
+                            color: AppTheme.textSecondary,
+                          ),
+                        ),
+                        validator: (v) {
+                          if ((_selectedRole == 'vendor' ||
+                                  _selectedRole == 'picker') &&
+                              (v == null || v.isEmpty))
+                            return 'Please enter your location';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                    ],
 
                     // Email
                     TextFormField(
@@ -252,12 +295,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           color: AppTheme.textSecondary,
                         ),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty)
+                      validator: (v) {
+                        if (v == null || v.isEmpty)
                           return 'Please enter your email';
                         if (!RegExp(
                           r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
-                        ).hasMatch(value))
+                        ).hasMatch(v))
                           return 'Please enter a valid email';
                         return null;
                       },
@@ -291,10 +334,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                         ),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty)
+                      validator: (v) {
+                        if (v == null || v.isEmpty)
                           return 'Please enter a password';
-                        if (value.length < 6)
+                        if (v.length < 6)
                           return 'Password must be at least 6 characters';
                         return null;
                       },
@@ -329,10 +372,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           ),
                         ),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty)
+                      validator: (v) {
+                        if (v == null || v.isEmpty)
                           return 'Please confirm your password';
-                        if (value != _passwordController.text)
+                        if (v != _passwordController.text)
                           return 'Passwords do not match';
                         return null;
                       },
@@ -340,7 +383,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                     const SizedBox(height: 28),
 
-                    // Register button
                     ElevatedButton(
                       onPressed: _isLoading ? null : _register,
                       child: _isLoading
@@ -360,7 +402,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
               const SizedBox(height: 28),
 
-              // Login link
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [

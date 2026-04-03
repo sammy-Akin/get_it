@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:get_it/auth/login_screen.dart';
 import 'package:get_it/auth/register_screen.dart';
 import 'package:get_it/screens/cart_screen.dart';
@@ -6,13 +7,17 @@ import 'package:get_it/screens/checkout_screen.dart';
 import 'package:get_it/screens/home_screen.dart';
 import 'package:get_it/screens/order_tracking_screen.dart';
 import 'package:get_it/screens/orders_screen.dart';
+import 'package:get_it/screens/payment_callback_screen.dart';
 import 'package:get_it/screens/profile_screen.dart';
 import 'package:get_it/screens/search_screen.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+// ignore: avoid_web_libraries_in_flutter
+import 'dart:html' as html show window;
 import '../screens/splash_screen.dart';
 import '../screens/onboarding_screen.dart';
-
+import '../screens/shop/shop_screen.dart';
+import '../screens/map/map_screen.dart';
 import '../screens/vendor/vendor_home_screen.dart';
 import '../screens/picker/picker_home_screen.dart';
 
@@ -21,18 +26,36 @@ class AppRouter {
   static final _authStream = FirebaseAuth.instance.authStateChanges();
 
   static final _authPaths = ['/login', '/register'];
-  static final _publicPaths = ['/', '/onboarding'];
+  static final _publicPaths = ['/', '/onboarding', '/payment/callback'];
+
+  /// On web, if the browser is already on /payment/callback
+  /// (Paystack just redirected back), start there directly.
+  /// This prevents SplashScreen from running and navigating to /home.
+  static String _getInitialLocation() {
+    if (kIsWeb) {
+      final uri = Uri.parse(html.window.location.href);
+      if (uri.path.contains('/payment/callback')) {
+        return '${uri.path}${uri.query.isNotEmpty ? '?${uri.query}' : ''}';
+      }
+    }
+    return '/';
+  }
 
   static final GoRouter router = GoRouter(
     navigatorKey: _rootNavigatorKey,
-    initialLocation: '/',
+    initialLocation: _getInitialLocation(),
     refreshListenable: _GoRouterRefreshStream(_authStream),
     redirect: (context, state) {
       final user = FirebaseAuth.instance.currentUser;
       final loc = state.matchedLocation;
 
-      if (_publicPaths.contains(loc)) return null;
+      // Never redirect away from public paths
+      if (_publicPaths.any((p) => loc.startsWith(p))) return null;
+
+      // Not signed in → send to login
       if (user == null) return _authPaths.contains(loc) ? null : '/login';
+
+      // Signed in on an auth page → let GoRouter handle naturally
       if (_authPaths.contains(loc)) return null;
 
       return null;
@@ -48,6 +71,13 @@ class AppRouter {
       GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
       GoRoute(path: '/cart', builder: (_, __) => const CartScreen()),
       GoRoute(path: '/checkout', builder: (_, __) => const CheckoutScreen()),
+
+      // Paystack redirects here after payment — must be public
+      GoRoute(
+        path: '/payment/callback',
+        builder: (_, __) => const PaymentCallbackScreen(),
+      ),
+
       GoRoute(
         path: '/order/:orderId',
         builder: (_, state) =>
@@ -59,6 +89,12 @@ class AppRouter {
       GoRoute(
         path: '/vendor-home',
         builder: (_, __) => const VendorHomeScreen(),
+      ),
+      GoRoute(path: '/map', builder: (_, __) => const MapScreen()),
+      GoRoute(
+        path: '/shop/:shopId',
+        builder: (_, state) =>
+            ShopScreen(shopId: state.pathParameters['shopId']!),
       ),
       GoRoute(
         path: '/picker-home',

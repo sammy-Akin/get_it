@@ -80,7 +80,6 @@ class _OrdersScreenState extends State<OrdersScreen>
 
 class _OrdersList extends StatelessWidget {
   final bool isActive;
-
   const _OrdersList({required this.isActive});
 
   @override
@@ -88,20 +87,12 @@ class _OrdersList extends StatelessWidget {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const SizedBox.shrink();
 
-    final activeStatuses = [
-      'pending',
-      'confirmed',
-      'rider_assigned',
-      'out_for_delivery',
-    ];
-    final pastStatuses = ['delivered', 'cancelled'];
-
+    // Fetch all customer orders then filter client-side
+    // This avoids needing a composite index for whereIn + orderBy
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('getit_orders')
           .where('customerId', isEqualTo: uid)
-          .where('status', whereIn: isActive ? activeStatuses : pastStatuses)
-          .orderBy('createdAt', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -111,17 +102,47 @@ class _OrdersList extends StatelessWidget {
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return _buildEmptyState(context, isActive);
+          return _buildEmptyState(context);
         }
 
-        final orders = snapshot.data!.docs;
+        final activeStatuses = [
+          'pending',
+          'pending_payment',
+          'confirmed',
+          'rider_assigned',
+          'out_for_delivery',
+        ];
+        final pastStatuses = ['delivered', 'cancelled'];
+
+        final allOrders = snapshot.data!.docs;
+
+        // Filter & sort client-side
+        final filtered = allOrders.where((doc) {
+          final status =
+              (doc.data() as Map<String, dynamic>)['status'] ?? 'pending';
+          return isActive
+              ? activeStatuses.contains(status)
+              : pastStatuses.contains(status);
+        }).toList();
+
+        // Sort by createdAt descending
+        filtered.sort((a, b) {
+          final aData = a.data() as Map<String, dynamic>;
+          final bData = b.data() as Map<String, dynamic>;
+          final aTime = aData['createdAt'] as Timestamp?;
+          final bTime = bData['createdAt'] as Timestamp?;
+          if (aTime == null || bTime == null) return 0;
+          return bTime.compareTo(aTime);
+        });
+
+        if (filtered.isEmpty) return _buildEmptyState(context);
 
         return ListView.builder(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          itemCount: orders.length,
+          itemCount: filtered.length,
           itemBuilder: (context, index) {
-            final data = orders[index].data() as Map<String, dynamic>;
-            final orderId = orders[index].id;
+            final data = filtered[index].data() as Map<String, dynamic>;
+            final orderId = filtered[index].id;
             return _OrderCard(data: data, orderId: orderId);
           },
         );
@@ -129,7 +150,7 @@ class _OrdersList extends StatelessWidget {
     );
   }
 
-  Widget _buildEmptyState(BuildContext context, bool isActive) {
+  Widget _buildEmptyState(BuildContext context) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -164,7 +185,7 @@ class _OrdersList extends StatelessWidget {
           Text(
             isActive
                 ? 'Your active orders will appear here'
-                : 'Your completed orders will appear here',
+                : 'Completed orders will show up here',
             style: const TextStyle(
               color: AppTheme.textSecondary,
               fontSize: 14,
@@ -200,17 +221,21 @@ class _OrderCard extends StatelessWidget {
     final shops = data['shops'] as Map<String, dynamic>? ?? {};
     final createdAt = data['createdAt'] as Timestamp?;
     final statusConfig = _getStatusConfig(status);
+    final total = (data['total'] as num?)?.toStringAsFixed(0) ?? '0';
 
     // Collect all item names
     final List<String> itemNames = [];
+    int totalItems = 0;
     for (final shop in shops.values) {
       final items = (shop as Map<String, dynamic>)['items'] as List? ?? [];
       for (final item in items) {
-        itemNames.add(
-          '${(item as Map<String, dynamic>)['name']} x${item['quantity']}',
-        );
+        final m = item as Map<String, dynamic>;
+        itemNames.add('${m['name']}');
+        totalItems += (m['quantity'] as num).toInt();
       }
     }
+
+    final isActive = _isActiveStatus(status);
 
     return GestureDetector(
       onTap: () => context.push('/order/$orderId'),
@@ -219,17 +244,21 @@ class _OrderCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppTheme.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.cardBorder),
+          border: Border.all(
+            color: isActive
+                ? AppTheme.primary.withOpacity(0.3)
+                : AppTheme.cardBorder,
+            width: isActive ? 1.5 : 1,
+          ),
         ),
         child: Column(
           children: [
-            // Header
+            // Header row
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Order ID + date
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -253,8 +282,6 @@ class _OrderCard extends StatelessWidget {
                         ),
                     ],
                   ),
-
-                  // Status badge
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 10,
@@ -294,27 +321,31 @@ class _OrderCard extends StatelessWidget {
 
             const Divider(height: 1, color: AppTheme.divider),
 
-            // Items summary
+            // Items + total
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: Row(
                 children: [
-                  // Shop count icon
                   Container(
-                    width: 40,
-                    height: 40,
+                    width: 44,
+                    height: 44,
                     decoration: BoxDecoration(
-                      color: AppTheme.surfaceLight,
-                      borderRadius: BorderRadius.circular(10),
+                      color: isActive
+                          ? AppTheme.primary.withOpacity(0.1)
+                          : AppTheme.surfaceLight,
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(
-                      Icons.shopping_bag_outlined,
-                      color: AppTheme.textSecondary,
-                      size: 20,
+                    child: Icon(
+                      isActive
+                          ? Icons.delivery_dining_rounded
+                          : Icons.shopping_bag_outlined,
+                      color: isActive
+                          ? AppTheme.primary
+                          : AppTheme.textSecondary,
+                      size: 22,
                     ),
                   ),
                   const SizedBox(width: 12),
-
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -334,7 +365,7 @@ class _OrderCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          '${shops.length} shop${shops.length > 1 ? 's' : ''}',
+                          '$totalItems item${totalItems > 1 ? 's' : ''} · ${shops.length} shop${shops.length > 1 ? 's' : ''}',
                           style: const TextStyle(
                             color: AppTheme.textSecondary,
                             fontSize: 12,
@@ -344,13 +375,11 @@ class _OrderCard extends StatelessWidget {
                       ],
                     ),
                   ),
-
-                  // Total + arrow
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        '₦${(data['total'] as num).toStringAsFixed(0)}',
+                        '₦$total',
                         style: const TextStyle(
                           color: AppTheme.textPrimary,
                           fontSize: 14,
@@ -370,8 +399,56 @@ class _OrderCard extends StatelessWidget {
               ),
             ),
 
-            // Track button for active orders
-            if (_isActive(status)) ...[
+            // Active order footer — track button
+            if (isActive) ...[
+              const Divider(height: 1, color: AppTheme.divider),
+              Container(
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withOpacity(0.05),
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(16),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.near_me_rounded,
+                        color: AppTheme.primary,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        statusConfig['label'] as String,
+                        style: const TextStyle(
+                          color: AppTheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                      const Spacer(),
+                      const Text(
+                        'Track Order →',
+                        style: TextStyle(
+                          color: AppTheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+
+            // Delivered — reorder button
+            if (status == 'delivered') ...[
               const Divider(height: 1, color: AppTheme.divider),
               Padding(
                 padding: const EdgeInsets.symmetric(
@@ -379,33 +456,37 @@ class _OrderCard extends StatelessWidget {
                   vertical: 10,
                 ),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primary,
-                        shape: BoxShape.circle,
-                      ),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.check_circle_rounded,
+                          color: AppTheme.success,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'Delivered',
+                          style: TextStyle(
+                            color: AppTheme.success,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            fontFamily: 'Poppins',
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      statusConfig['label'] as String,
-                      style: const TextStyle(
-                        color: AppTheme.primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'Poppins',
-                      ),
-                    ),
-                    const Spacer(),
-                    const Text(
-                      'Track Order →',
-                      style: TextStyle(
-                        color: AppTheme.primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'Poppins',
+                    GestureDetector(
+                      onTap: () => context.go('/home'),
+                      child: const Text(
+                        'Order Again →',
+                        style: TextStyle(
+                          color: AppTheme.primary,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'Poppins',
+                        ),
                       ),
                     ),
                   ],
@@ -418,19 +499,18 @@ class _OrderCard extends StatelessWidget {
     );
   }
 
-  bool _isActive(String status) {
-    return [
-      'pending',
-      'confirmed',
-      'rider_assigned',
-      'out_for_delivery',
-    ].contains(status);
-  }
+  bool _isActiveStatus(String status) => [
+    'pending',
+    'pending_payment',
+    'confirmed',
+    'rider_assigned',
+    'out_for_delivery',
+  ].contains(status);
 
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final diff = now.difference(date);
-
+    if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     if (diff.inDays == 1) return 'Yesterday';
@@ -439,6 +519,8 @@ class _OrderCard extends StatelessWidget {
 
   Map<String, dynamic> _getStatusConfig(String status) {
     switch (status) {
+      case 'pending_payment':
+        return {'label': 'Payment Pending', 'color': Colors.orange};
       case 'pending':
         return {'label': 'Order Placed', 'color': Colors.orange};
       case 'confirmed':
@@ -446,7 +528,7 @@ class _OrderCard extends StatelessWidget {
       case 'rider_assigned':
         return {'label': 'Rider Assigned', 'color': AppTheme.primary};
       case 'out_for_delivery':
-        return {'label': 'On the Way', 'color': AppTheme.primary};
+        return {'label': 'On the Way 🚀', 'color': AppTheme.primary};
       case 'delivered':
         return {'label': 'Delivered', 'color': AppTheme.success};
       case 'cancelled':

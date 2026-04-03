@@ -1,3 +1,5 @@
+// lib/main.dart
+
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:get_it/providers/cart_provider.dart';
@@ -24,6 +26,46 @@ class GetItApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,
         routerConfig: AppRouter.router,
+        builder: (context, child) {
+          return _ResponsiveWrapper(child: child!);
+        },
+      ),
+    );
+  }
+}
+
+class _ResponsiveWrapper extends StatelessWidget {
+  final Widget child;
+  const _ResponsiveWrapper({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final width = MediaQuery.of(context).size.width;
+    final isMobile = width < 600;
+
+    if (isMobile) return child;
+
+    // On tablets/desktop — show app centered like a phone
+    // with a subtle background
+    const appWidth = 420.0;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF050505),
+      body: Center(
+        child: Container(
+          width: appWidth,
+          decoration: BoxDecoration(
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.5),
+                blurRadius: 40,
+                spreadRadius: 10,
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: child,
+        ),
       ),
     );
   }

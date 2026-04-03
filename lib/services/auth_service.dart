@@ -15,6 +15,8 @@ class AuthService {
     required String password,
     required String fullName,
     String role = 'customer',
+    String? businessName,
+    String? location,
   }) async {
     try {
       final credential = await _auth.createUserWithEmailAndPassword(
@@ -28,6 +30,8 @@ class AuthService {
         email: email,
         photoUrl: credential.user?.photoURL,
         role: role,
+        businessName: businessName,
+        location: location,
       );
       return credential;
     } on FirebaseAuthException catch (e) {
@@ -44,15 +48,16 @@ class AuthService {
         email: email,
         password: password,
       );
-
-      // Ensure Firestore doc exists — handles orphaned accounts
-      await _ensureUserDoc(
-        uid: credential.user!.uid,
-        fullName: credential.user?.displayName ?? '',
-        email: credential.user?.email ?? '',
-        photoUrl: credential.user?.photoURL,
-      );
-
+      try {
+        await _ensureUserDoc(
+          uid: credential.user!.uid,
+          fullName: credential.user?.displayName ?? '',
+          email: credential.user?.email ?? '',
+          photoUrl: credential.user?.photoURL,
+        );
+      } catch (_) {
+        // Firestore errors should not block login
+      }
       return credential;
     } on FirebaseAuthException catch (e) {
       throw _handleAuthException(e);
@@ -66,7 +71,6 @@ class AuthService {
         ..addScope('profile');
 
       late UserCredential userCredential;
-
       if (kIsWeb) {
         userCredential = await _auth.signInWithPopup(googleProvider);
       } else {
@@ -113,18 +117,20 @@ class AuthService {
     }
   }
 
-  // Full save — only writes role on first creation
   Future<void> _saveUserToFirestore({
     required String uid,
     required String fullName,
     required String email,
     String? photoUrl,
     String role = 'customer',
+    String? businessName,
+    String? location,
   }) async {
     final userRef = _firestore.collection('getit_users').doc(uid);
     final userDoc = await userRef.get();
+
     if (!userDoc.exists) {
-      await userRef.set({
+      final data = {
         'uid': uid,
         'fullName': fullName,
         'email': email,
@@ -132,9 +138,49 @@ class AuthService {
         'role': role,
         'addresses': [],
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      };
+
+      if (businessName != null && businessName.isNotEmpty) {
+        data['shopName'] = businessName;
+      }
+      if (location != null && location.isNotEmpty) {
+        data['location'] = location;
+      }
+
+      await userRef.set(data);
+
+      // If vendor, also create getit_vendors doc
+      if (role == 'vendor') {
+        await _firestore.collection('getit_vendors').doc(uid).set({
+          'id': uid,
+          'name': businessName ?? fullName,
+          'ownerName': fullName,
+          'email': email,
+          'location': location ?? '',
+          'category': '',
+          'description': '',
+          'imageUrl': '',
+          'isOpen': true,
+          'isApproved': true,
+          'rating': 5.0,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // If picker, also create getit_riders doc
+      if (role == 'picker') {
+        await _firestore.collection('getit_riders').doc(uid).set({
+          'id': uid,
+          'name': fullName,
+          'email': email,
+          'location': location ?? '',
+          'isAvailable': true,
+          'totalDeliveries': 0,
+          'totalEarnings': 0,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
     } else {
-      // Never overwrite role on update
       await userRef.update({
         'fullName': fullName,
         'email': email,
@@ -144,7 +190,6 @@ class AuthService {
     }
   }
 
-  // Ensures doc exists for orphaned Auth accounts (no role → defaults to customer)
   Future<void> _ensureUserDoc({
     required String uid,
     required String fullName,

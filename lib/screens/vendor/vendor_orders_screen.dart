@@ -13,7 +13,7 @@ class VendorOrdersScreen extends StatefulWidget {
 class _VendorOrdersScreenState extends State<VendorOrdersScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
-  final _uid = FirebaseAuth.instance.currentUser?.uid;
+  final _uid = FirebaseAuth.instance.currentUser?.uid ?? '';
 
   @override
   void initState() {
@@ -67,14 +67,26 @@ class _VendorOrdersScreenState extends State<VendorOrdersScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-          _OrdersList(vendorId: _uid!, statusFilter: ['pending']),
-          _OrdersList(
-            vendorId: _uid!,
-            statusFilter: ['confirmed', 'rider_assigned', 'out_for_delivery'],
+          _VendorOrdersList(
+            vendorId: _uid,
+            shopStatuses: const ['pending'],
+            emptyMessage: 'No new orders',
+            emptySubtext: 'New orders will appear here',
+            emptyIcon: Icons.notifications_none_rounded,
           ),
-          _OrdersList(
-            vendorId: _uid!,
-            statusFilter: ['delivered', 'cancelled'],
+          _VendorOrdersList(
+            vendorId: _uid,
+            shopStatuses: const ['confirmed', 'ready'],
+            emptyMessage: 'No active orders',
+            emptySubtext: 'Accepted orders will show here',
+            emptyIcon: Icons.storefront_outlined,
+          ),
+          _VendorOrdersList(
+            vendorId: _uid,
+            shopStatuses: const ['picked_up', 'cancelled'],
+            emptyMessage: 'No completed orders',
+            emptySubtext: 'Fulfilled orders will show here',
+            emptyIcon: Icons.receipt_long_outlined,
           ),
         ],
       ),
@@ -82,19 +94,34 @@ class _VendorOrdersScreenState extends State<VendorOrdersScreen>
   }
 }
 
-class _OrdersList extends StatelessWidget {
+class _VendorOrdersList extends StatelessWidget {
   final String vendorId;
-  final List<String> statusFilter;
+  final List<String> shopStatuses;
+  final String emptyMessage;
+  final String emptySubtext;
+  final IconData emptyIcon;
 
-  const _OrdersList({required this.vendorId, required this.statusFilter});
+  const _VendorOrdersList({
+    required this.vendorId,
+    required this.shopStatuses,
+    required this.emptyMessage,
+    required this.emptySubtext,
+    required this.emptyIcon,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // ── KEY FIX ──────────────────────────────────────────────────────────────
+    // Removed .orderBy('createdAt') because combining it with
+    // .where('paymentStatus') requires a composite Firestore index.
+    // Without the index the query silently returns nothing.
+    // We sort client-side instead — same result, no index needed.
+    // ─────────────────────────────────────────────────────────────────────────
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('getit_orders')
-          .where('status', whereIn: statusFilter)
-          .orderBy('createdAt', descending: true)
+          .where('paymentStatus', isEqualTo: 'paid')
+          .limit(100)
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -103,16 +130,67 @@ class _OrdersList extends StatelessWidget {
           );
         }
 
-        // Filter orders that contain this vendor's shop
         final allDocs = snapshot.data?.docs ?? [];
+
+        // Filter: must contain this vendor AND shop status matches
         final vendorOrders = allDocs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final shops = data['shops'] as Map<String, dynamic>? ?? {};
-          return shops.containsKey(vendorId);
+          if (!shops.containsKey(vendorId)) return false;
+          final myShop = shops[vendorId] as Map<String, dynamic>? ?? {};
+          final shopStatus = myShop['status'] ?? 'pending';
+          return shopStatuses.contains(shopStatus);
         }).toList();
 
+        // Sort client-side by createdAt descending
+        vendorOrders.sort((a, b) {
+          final aT = (a.data() as Map)['createdAt'] as Timestamp?;
+          final bT = (b.data() as Map)['createdAt'] as Timestamp?;
+          if (aT == null || bT == null) return 0;
+          return bT.compareTo(aT);
+        });
+
         if (vendorOrders.isEmpty) {
-          return _buildEmpty(statusFilter.first);
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    color: AppTheme.surface,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppTheme.cardBorder),
+                  ),
+                  child: Icon(
+                    emptyIcon,
+                    color: AppTheme.textSecondary,
+                    size: 38,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  emptyMessage,
+                  style: const TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  emptySubtext,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontFamily: 'Poppins',
+                  ),
+                ),
+              ],
+            ),
+          );
         }
 
         return ListView.builder(
@@ -131,55 +209,9 @@ class _OrdersList extends StatelessWidget {
       },
     );
   }
-
-  Widget _buildEmpty(String status) {
-    final isNew = status == 'pending';
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 80,
-            height: 80,
-            decoration: BoxDecoration(
-              color: AppTheme.surface,
-              shape: BoxShape.circle,
-              border: Border.all(color: AppTheme.cardBorder),
-            ),
-            child: Icon(
-              isNew
-                  ? Icons.notifications_none_rounded
-                  : Icons.receipt_long_outlined,
-              color: AppTheme.textSecondary,
-              size: 40,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            isNew ? 'No new orders' : 'Nothing here yet',
-            style: const TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.bold,
-              fontFamily: 'Poppins',
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            isNew ? 'New orders will appear here' : 'Orders will show up here',
-            style: const TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-              fontFamily: 'Poppins',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
-class _VendorOrderCard extends StatelessWidget {
+class _VendorOrderCard extends StatefulWidget {
   final String orderId;
   final Map<String, dynamic> data;
   final String vendorId;
@@ -190,39 +222,161 @@ class _VendorOrderCard extends StatelessWidget {
     required this.vendorId,
   });
 
-  Future<void> _updateShopStatus(String status) async {
-    await FirebaseFirestore.instance
-        .collection('getit_orders')
-        .doc(orderId)
-        .update({'shops.$vendorId.status': status});
+  @override
+  State<_VendorOrderCard> createState() => _VendorOrderCardState();
+}
 
-    // If confirmed, check if all shops confirmed → update order status
-    if (status == 'confirmed') {
-      final doc = await FirebaseFirestore.instance
-          .collection('getit_orders')
-          .doc(orderId)
-          .get();
-      final shops = (doc.data()?['shops'] as Map<String, dynamic>?) ?? {};
-      final allConfirmed = shops.values.every(
-        (s) => (s as Map)['status'] == 'confirmed',
-      );
-      if (allConfirmed) {
-        await FirebaseFirestore.instance
-            .collection('getit_orders')
-            .doc(orderId)
-            .update({'status': 'confirmed'});
+class _VendorOrderCardState extends State<_VendorOrderCard> {
+  bool _isUpdating = false;
+
+  Future<void> _updateShopStatus(String newStatus) async {
+    setState(() => _isUpdating = true);
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final orderRef = firestore.collection('getit_orders').doc(widget.orderId);
+
+      await orderRef.update({'shops.${widget.vendorId}.status': newStatus});
+
+      if (newStatus == 'confirmed') {
+        final shops = widget.data['shops'] as Map<String, dynamic>? ?? {};
+        final myShop = shops[widget.vendorId] as Map<String, dynamic>? ?? {};
+        final items = myShop['items'] as List<dynamic>? ?? [];
+
+        final batch = firestore.batch();
+        for (final item in items) {
+          final i = item as Map<String, dynamic>;
+          final productId = i['productId'] as String?;
+          final quantity = (i['quantity'] as num).toInt();
+          if (productId != null) {
+            batch.update(
+              firestore.collection('getit_products').doc(productId),
+              {'stockQty': FieldValue.increment(-quantity)},
+            );
+          }
+        }
+        await batch.commit();
+
+        for (final item in items) {
+          final i = item as Map<String, dynamic>;
+          final productId = i['productId'] as String?;
+          if (productId != null) {
+            final productDoc = await firestore
+                .collection('getit_products')
+                .doc(productId)
+                .get();
+            final newQty =
+                (productDoc.data()?['stockQty'] as num?)?.toInt() ?? 0;
+            if (newQty <= 0) {
+              await firestore
+                  .collection('getit_products')
+                  .doc(productId)
+                  .update({'isAvailable': false, 'stockQty': 0});
+            }
+          }
+        }
+
+        final freshDoc = await orderRef.get();
+        final allShops =
+            (freshDoc.data()?['shops'] as Map<String, dynamic>?) ?? {};
+        final allConfirmed = allShops.values.every(
+          (s) => (s as Map<String, dynamic>)['status'] == 'confirmed',
+        );
+        if (allConfirmed) {
+          await orderRef.update({'status': 'confirmed'});
+        }
       }
+
+      if (newStatus == 'cancelled') {
+        await orderRef.update({'status': 'cancelled'});
+      }
+
+      if (newStatus == 'ready') {
+        final freshDoc = await orderRef.get();
+        final allShops =
+            (freshDoc.data()?['shops'] as Map<String, dynamic>?) ?? {};
+        final allReady = allShops.values.every(
+          (s) => (s as Map<String, dynamic>)['status'] == 'ready',
+        );
+        if (allReady) {
+          await orderRef.update({'status': 'ready_for_pickup'});
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isUpdating = false);
     }
+  }
+
+  void _showRejectDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Reject Order?',
+          style: TextStyle(
+            color: AppTheme.textPrimary,
+            fontFamily: 'Poppins',
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: const Text(
+          'The customer will be notified. This cannot be undone.',
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontFamily: 'Poppins',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontFamily: 'Poppins',
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _updateShopStatus('cancelled');
+            },
+            child: const Text(
+              'Reject',
+              style: TextStyle(
+                color: AppTheme.error,
+                fontWeight: FontWeight.w600,
+                fontFamily: 'Poppins',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final shops = data['shops'] as Map<String, dynamic>? ?? {};
-    final myShop = shops[vendorId] as Map<String, dynamic>? ?? {};
+    final shops = widget.data['shops'] as Map<String, dynamic>? ?? {};
+    final myShop = shops[widget.vendorId] as Map<String, dynamic>? ?? {};
     final items = myShop['items'] as List<dynamic>? ?? [];
     final shopStatus = myShop['status'] ?? 'pending';
-    final createdAt = data['createdAt'] as Timestamp?;
+    final createdAt = widget.data['createdAt'] as Timestamp?;
     final isPending = shopStatus == 'pending';
+    final isConfirmed = shopStatus == 'confirmed';
+
+    double myTotal = 0;
+    for (final item in items) {
+      myTotal += (item as Map<String, dynamic>)['totalPrice'] as num;
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -231,7 +385,7 @@ class _VendorOrderCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isPending
-              ? AppTheme.primary.withOpacity(0.4)
+              ? Colors.orange.withOpacity(0.5)
               : AppTheme.cardBorder,
           width: isPending ? 1.5 : 1,
         ),
@@ -248,7 +402,7 @@ class _VendorOrderCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '#${orderId.substring(0, 8).toUpperCase()}',
+                      '#${widget.orderId.substring(0, 8).toUpperCase()}',
                       style: const TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 14,
@@ -267,7 +421,7 @@ class _VendorOrderCard extends StatelessWidget {
                       ),
                   ],
                 ),
-                _buildStatusBadge(shopStatus),
+                _StatusBadge(status: shopStatus),
               ],
             ),
           ),
@@ -276,47 +430,44 @@ class _VendorOrderCard extends StatelessWidget {
 
           // Items
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
             child: Column(
               children: [
                 ...items.map((item) {
                   final i = item as Map<String, dynamic>;
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: 10),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  '${i['quantity']}x',
-                                  style: const TextStyle(
-                                    color: AppTheme.primary,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                    fontFamily: 'Poppins',
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              i['name'] ?? '',
+                        Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Center(
+                            child: Text(
+                              '${i['quantity']}x',
                               style: const TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 13,
+                                color: AppTheme.primary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
                                 fontFamily: 'Poppins',
                               ),
                             ),
-                          ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            i['name'] ?? '',
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 13,
+                              fontFamily: 'Poppins',
+                            ),
+                          ),
                         ),
                         Text(
                           '₦${(i['totalPrice'] as num).toStringAsFixed(0)}',
@@ -331,35 +482,65 @@ class _VendorOrderCard extends StatelessWidget {
                     ),
                   );
                 }),
-
-                // Delivery address
-                const Divider(color: AppTheme.divider),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.location_on_outlined,
-                      color: AppTheme.textSecondary,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        data['deliveryAddress'] ?? '',
-                        style: const TextStyle(
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: const BoxDecoration(
+                    border: Border(top: BorderSide(color: AppTheme.divider)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Your earnings',
+                        style: TextStyle(
                           color: AppTheme.textSecondary,
                           fontSize: 12,
                           fontFamily: 'Poppins',
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
-                  ],
+                      Text(
+                        '₦${myTotal.toStringAsFixed(0)}',
+                        style: const TextStyle(
+                          color: AppTheme.success,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          fontFamily: 'Poppins',
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
 
-          // Action buttons for pending orders
+          // Delivery address
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.location_on_outlined,
+                  color: AppTheme.textSecondary,
+                  size: 14,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    widget.data['deliveryAddress'] ?? '',
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 12,
+                      fontFamily: 'Poppins',
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Actions
           if (isPending) ...[
             const Divider(height: 1, color: AppTheme.divider),
             Padding(
@@ -368,18 +549,18 @@ class _VendorOrderCard extends StatelessWidget {
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: () => _updateShopStatus('cancelled'),
+                      onPressed: _isUpdating ? null : _showRejectDialog,
                       style: OutlinedButton.styleFrom(
-                        minimumSize: const Size(0, 44),
+                        minimumSize: const Size(0, 46),
                         side: const BorderSide(color: AppTheme.error),
                         foregroundColor: AppTheme.error,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
                       child: const Text(
                         'Reject',
-                        style: TextStyle(fontFamily: 'Poppins', fontSize: 13),
+                        style: TextStyle(fontFamily: 'Poppins', fontSize: 14),
                       ),
                     ),
                   ),
@@ -387,17 +568,32 @@ class _VendorOrderCard extends StatelessWidget {
                   Expanded(
                     flex: 2,
                     child: ElevatedButton(
-                      onPressed: () => _updateShopStatus('confirmed'),
+                      onPressed: _isUpdating
+                          ? null
+                          : () => _updateShopStatus('confirmed'),
                       style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(0, 44),
+                        minimumSize: const Size(0, 46),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Text(
-                        'Accept Order',
-                        style: TextStyle(fontFamily: 'Poppins', fontSize: 13),
-                      ),
+                      child: _isUpdating
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text(
+                              'Accept Order',
+                              style: TextStyle(
+                                fontFamily: 'Poppins',
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
                 ],
@@ -405,24 +601,83 @@ class _VendorOrderCard extends StatelessWidget {
             ),
           ],
 
-          // Mark ready button for confirmed orders
-          if (shopStatus == 'confirmed') ...[
+          if (isConfirmed) ...[
             const Divider(height: 1, color: AppTheme.divider),
             Padding(
               padding: const EdgeInsets.all(12),
               child: ElevatedButton(
-                onPressed: () => _updateShopStatus('ready'),
+                onPressed: _isUpdating
+                    ? null
+                    : () => _updateShopStatus('ready'),
                 style: ElevatedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 44),
+                  minimumSize: const Size(double.infinity, 46),
                   backgroundColor: AppTheme.success,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
-                child: const Text(
-                  'Mark as Ready',
-                  style: TextStyle(fontFamily: 'Poppins', fontSize: 13),
+                child: _isUpdating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Mark Ready for Pickup',
+                            style: TextStyle(
+                              fontFamily: 'Poppins',
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ],
+
+          if (shopStatus == 'ready') ...[
+            const Divider(height: 1, color: AppTheme.divider),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.success.withOpacity(0.05),
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(16),
                 ),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.access_time_rounded,
+                    color: AppTheme.success,
+                    size: 16,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Waiting for rider to pick up',
+                    style: TextStyle(
+                      color: AppTheme.success,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -431,13 +686,28 @@ class _VendorOrderCard extends StatelessWidget {
     );
   }
 
-  Widget _buildStatusBadge(String status) {
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final diff = now.difference(date);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${date.day}/${date.month}/${date.year}';
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  final String status;
+  const _StatusBadge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
     Color color;
     String label;
     switch (status) {
       case 'pending':
         color = Colors.orange;
-        label = 'New Order';
+        label = '🔔 New Order';
         break;
       case 'confirmed':
         color = AppTheme.primary;
@@ -445,7 +715,7 @@ class _VendorOrderCard extends StatelessWidget {
         break;
       case 'ready':
         color = AppTheme.success;
-        label = 'Ready';
+        label = '✓ Ready';
         break;
       case 'picked_up':
         color = AppTheme.success;
@@ -461,39 +731,20 @@ class _VendorOrderCard extends StatelessWidget {
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              fontFamily: 'Poppins',
-            ),
-          ),
-        ],
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          fontFamily: 'Poppins',
+        ),
       ),
     );
-  }
-
-  String _formatDate(DateTime date) {
-    final now = DateTime.now();
-    final diff = now.difference(date);
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return '${date.day}/${date.month}/${date.year}';
   }
 }

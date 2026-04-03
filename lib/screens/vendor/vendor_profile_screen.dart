@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:get_it/screens/vendor/vendor_earning_screen.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme.dart';
 import '../../services/auth_service.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../map/location_picker_screen.dart';
 
 class VendorProfileScreen extends StatelessWidget {
   const VendorProfileScreen({super.key});
@@ -65,6 +68,16 @@ class VendorProfileScreen extends StatelessWidget {
                   label: 'Notifications',
                   onTap: () {},
                 ),
+                _MenuItem(
+                  icon: Icons.payments_rounded,
+                  label: 'Earnings & Withdrawals',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const VendorEarningsScreen(),
+                    ),
+                  ),
+                ),
               ]),
 
               const SizedBox(height: 24),
@@ -110,6 +123,7 @@ class VendorProfileScreen extends StatelessWidget {
   Widget _buildShopHeader(User? user, Map<String, dynamic> data) {
     final shopName = data['shopName'] ?? data['fullName'] ?? 'My Shop';
     final category = data['shopCategory'] ?? 'General';
+    final location = data['location'] ?? '';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -160,6 +174,30 @@ class VendorProfileScreen extends StatelessWidget {
                     fontFamily: 'Poppins',
                   ),
                 ),
+                if (location.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on_outlined,
+                        color: AppTheme.textSecondary,
+                        size: 13,
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          location,
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 12,
+                            fontFamily: 'Poppins',
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -402,10 +440,14 @@ class VendorProfileScreen extends StatelessWidget {
     final nameCtrl = TextEditingController(
       text: data['shopName'] ?? data['fullName'] ?? '',
     );
+    final locationCtrl = TextEditingController(text: data['location'] ?? '');
     final categoryCtrl = TextEditingController(
       text: data['shopCategory'] ?? '',
     );
     final descCtrl = TextEditingController(text: data['shopDescription'] ?? '');
+
+    double? latResult = (data['latitude'] as num?)?.toDouble();
+    double? lngResult = (data['longitude'] as num?)?.toDouble();
 
     showModalBottomSheet(
       context: context,
@@ -461,6 +503,69 @@ class VendorProfileScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
+            StatefulBuilder(
+              builder: (context, setInnerState) => GestureDetector(
+                onTap: () async {
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => LocationPickerScreen(
+                        initialAddress: locationCtrl.text.isNotEmpty
+                            ? locationCtrl.text
+                            : null,
+                      ),
+                    ),
+                  );
+                  if (result != null) {
+                    locationCtrl.text = result['address'] ?? '';
+                    latResult = result['latitude'] as double?;
+                    lngResult = result['longitude'] as double?;
+                    setInnerState(() {});
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 14,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceLight,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.cardBorder),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.location_on_outlined,
+                        color: AppTheme.primary,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          locationCtrl.text.isNotEmpty
+                              ? locationCtrl.text
+                              : 'Tap to set shop location on map',
+                          style: TextStyle(
+                            color: locationCtrl.text.isNotEmpty
+                                ? AppTheme.textPrimary
+                                : AppTheme.textSecondary,
+                            fontFamily: 'Poppins',
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.arrow_forward_ios_rounded,
+                        color: AppTheme.textSecondary,
+                        size: 14,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: categoryCtrl,
               style: const TextStyle(
@@ -494,29 +599,41 @@ class VendorProfileScreen extends StatelessWidget {
             const SizedBox(height: 20),
             ElevatedButton(
               onPressed: () async {
-                await FirebaseFirestore.instance
-                    .collection('getit_users')
-                    .doc(uid)
-                    .update({
-                      'shopName': nameCtrl.text.trim(),
-                      'shopCategory': categoryCtrl.text.trim(),
-                      'shopDescription': descCtrl.text.trim(),
-                    });
-                // Also update getit_vendors
-                await FirebaseFirestore.instance
-                    .collection('getit_vendors')
-                    .doc(uid)
-                    .set({
-                      'id': uid,
-                      'name': nameCtrl.text.trim(),
-                      'category': categoryCtrl.text.trim(),
-                      'description': descCtrl.text.trim(),
-                      'isOpen': true,
-                      'imageUrl': '',
-                      'rating': 5.0,
-                      'updatedAt': FieldValue.serverTimestamp(),
-                    }, SetOptions(merge: true));
-                if (context.mounted) Navigator.pop(context);
+                try {
+                  await FirebaseFirestore.instance
+                      .collection('getit_users')
+                      .doc(uid)
+                      .update({
+                        'shopName': nameCtrl.text.trim(),
+                        'location': locationCtrl.text.trim(),
+                        'shopCategory': categoryCtrl.text.trim(),
+                        'shopDescription': descCtrl.text.trim(),
+                      });
+                  final vendorData = <String, dynamic>{
+                    'id': uid,
+                    'name': nameCtrl.text.trim(),
+                    'location': locationCtrl.text.trim(),
+                    'category': categoryCtrl.text.trim(),
+                    'description': descCtrl.text.trim(),
+                    'isOpen': true,
+                    'imageUrl': '',
+                    'rating': 5.0,
+                    'updatedAt': FieldValue.serverTimestamp(),
+                  };
+                  if (latResult != null) vendorData['latitude'] = latResult!;
+                  if (lngResult != null) vendorData['longitude'] = lngResult!;
+                  await FirebaseFirestore.instance
+                      .collection('getit_vendors')
+                      .doc(uid)
+                      .set(vendorData, SetOptions(merge: true));
+                  if (context.mounted) Navigator.pop(context);
+                } catch (e) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(SnackBar(content: Text('Error: $e')));
+                  }
+                }
               },
               child: const Text('Save Changes'),
             ),

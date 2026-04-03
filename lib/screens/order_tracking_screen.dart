@@ -63,43 +63,98 @@ class OrderTrackingScreen extends StatelessWidget {
           return ListView(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
             children: [
-              // Order confirmed banner
               _buildStatusBanner(status),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
-              // Live status tracker
+              // ETA card
+              if (status != 'delivered' && status != 'cancelled')
+                _buildEtaCard(status),
+              if (status != 'delivered' && status != 'cancelled')
+                const SizedBox(height: 16),
+
               _buildStatusTracker(status),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
-              // Rider info (when assigned)
               if (data['riderId'] != null) ...[
                 _buildRiderCard(data),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
               ],
 
-              // Delivery address
               _buildDeliveryAddress(data),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
-              // Order details
               _buildOrderDetails(shops, data),
+              const SizedBox(height: 16),
+
+              _buildPaymentInfo(data),
               const SizedBox(height: 24),
 
-              // Payment info
-              _buildPaymentInfo(data),
-              const SizedBox(height: 32),
-
-              // Back to home button (if delivered)
               if (status == 'delivered')
                 ElevatedButton(
                   onPressed: () => context.go('/home'),
-                  child: const Text('Back to Home'),
+                  child: const Text('Order Again'),
                 ),
 
               const SizedBox(height: 32),
             ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _buildEtaCard(String status) {
+    String eta;
+    switch (status) {
+      case 'pending':
+      case 'confirmed':
+      case 'ready_for_pickup':
+        eta = 'Est. 20–30 min';
+        break;
+      case 'rider_assigned':
+        eta = 'Est. 15–20 min';
+        break;
+      case 'out_for_delivery':
+        eta = 'Est. 5–10 min';
+        break;
+      default:
+        eta = 'Est. 20–30 min';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.primary.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.access_time_rounded,
+            color: AppTheme.primary,
+            size: 20,
+          ),
+          const SizedBox(width: 10),
+          Text(
+            eta,
+            style: const TextStyle(
+              color: AppTheme.primary,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              fontFamily: 'Poppins',
+            ),
+          ),
+          const Spacer(),
+          const Text(
+            'Within your estate',
+            style: TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 12,
+              fontFamily: 'Poppins',
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -162,46 +217,44 @@ class OrderTrackingScreen extends StatelessWidget {
   Widget _buildStatusTracker(String status) {
     final steps = [
       {
-        'id': 'pending',
-        'label': 'Order Placed',
-        'subtitle': 'We received your order',
-        'icon': Icons.receipt_long_rounded,
-      },
-      {
         'id': 'confirmed',
-        'label': 'Shop Confirmed',
-        'subtitle': 'Shops are preparing your items',
-        'icon': Icons.storefront_rounded,
+        'label': 'Order Confirmed',
+        'subtitle': 'Payment received, shops notified',
+        'icon': Icons.receipt_long_rounded,
       },
       {
         'id': 'rider_assigned',
         'label': 'Rider Assigned',
-        'subtitle': 'A rider is on the way to pick up',
+        'subtitle': 'A rider is heading to the shop',
         'icon': Icons.delivery_dining_rounded,
       },
       {
         'id': 'out_for_delivery',
         'label': 'Out for Delivery',
-        'subtitle': 'Your order is on its way',
+        'subtitle': 'Your order is on its way to you',
         'icon': Icons.near_me_rounded,
       },
       {
         'id': 'delivered',
         'label': 'Delivered',
-        'subtitle': 'Enjoy your order!',
+        'subtitle': 'Enjoy your order! 🎉',
         'icon': Icons.check_circle_rounded,
       },
     ];
 
     final statusOrder = [
       'pending',
+      'pending_payment',
       'confirmed',
+      'ready_for_pickup',
       'rider_assigned',
       'out_for_delivery',
       'delivered',
     ];
 
     final currentIndex = statusOrder.indexOf(status);
+    // Map to steps index (steps start at confirmed = index 2)
+    final stepsIndex = currentIndex - 2;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -214,7 +267,7 @@ class OrderTrackingScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Order Status',
+            'Delivery Progress',
             style: TextStyle(
               color: AppTheme.textPrimary,
               fontSize: 15,
@@ -225,17 +278,17 @@ class OrderTrackingScreen extends StatelessWidget {
           const SizedBox(height: 20),
           ...List.generate(steps.length, (index) {
             final step = steps[index];
-            final isDone = index <= currentIndex;
-            final isActive = index == currentIndex;
+            final isDone = index <= stepsIndex;
+            final isActive = index == stepsIndex;
             final isLast = index == steps.length - 1;
 
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Icon + line
                 Column(
                   children: [
-                    Container(
+                    AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
@@ -257,21 +310,20 @@ class OrderTrackingScreen extends StatelessWidget {
                       ),
                     ),
                     if (!isLast)
-                      Container(
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
                         width: 2,
-                        height: 36,
-                        color: index < currentIndex
+                        height: 40,
+                        color: index < stepsIndex
                             ? AppTheme.primary
                             : AppTheme.divider,
                       ),
                   ],
                 ),
                 const SizedBox(width: 16),
-
-                // Text
                 Expanded(
                   child: Padding(
-                    padding: EdgeInsets.only(bottom: isLast ? 0 : 20, top: 8),
+                    padding: EdgeInsets.only(bottom: isLast ? 0 : 16, top: 8),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -304,19 +356,10 @@ class OrderTrackingScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-
-                // Active pulse indicator
                 if (isActive && status != 'delivered')
                   Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: AppTheme.primary,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
+                    padding: const EdgeInsets.only(top: 12),
+                    child: _PulsingDot(),
                   ),
               ],
             );
@@ -374,21 +417,17 @@ class OrderTrackingScreen extends StatelessWidget {
               ],
             ),
           ),
-          // Call button
-          GestureDetector(
-            onTap: () {},
-            child: Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppTheme.success.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(
-                Icons.call_rounded,
-                color: AppTheme.success,
-                size: 22,
-              ),
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: AppTheme.success.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.call_rounded,
+              color: AppTheme.success,
+              size: 22,
             ),
           ),
         ],
@@ -443,11 +482,11 @@ class OrderTrackingScreen extends StatelessWidget {
                     fontFamily: 'Poppins',
                   ),
                 ),
-                if ((data['landmark'] ?? '').isNotEmpty)
+                if ((data['note'] ?? '').isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(top: 2),
+                    padding: const EdgeInsets.only(top: 4),
                     child: Text(
-                      'Near ${data['landmark']}',
+                      'Note: ${data['note']}',
                       style: const TextStyle(
                         color: AppTheme.textSecondary,
                         fontSize: 12,
@@ -467,6 +506,13 @@ class OrderTrackingScreen extends StatelessWidget {
     Map<String, dynamic> shops,
     Map<String, dynamic> data,
   ) {
+    final subtotal = (data['subtotal'] as num?)?.toDouble() ?? 0;
+    final serviceCharge =
+        (data['serviceCharge'] as num?)?.toDouble() ?? subtotal * 0.03;
+    final deliveryFee = (data['deliveryFee'] as num?)?.toDouble() ?? 0;
+    final riderIncentive = (data['riderIncentive'] as num?)?.toDouble() ?? 150;
+    final total = (data['total'] as num?)?.toDouble() ?? 0;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -501,7 +547,6 @@ class OrderTrackingScreen extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // Items per shop
           ...shops.entries.map((entry) {
             final shopData = entry.value as Map<String, dynamic>;
             final items = shopData['items'] as List<dynamic>? ?? [];
@@ -537,7 +582,7 @@ class OrderTrackingScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 ...items.map((item) {
-                  final itemMap = item as Map<String, dynamic>;
+                  final m = item as Map<String, dynamic>;
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Row(
@@ -545,7 +590,7 @@ class OrderTrackingScreen extends StatelessWidget {
                       children: [
                         Expanded(
                           child: Text(
-                            '${itemMap['name']} x${itemMap['quantity']}',
+                            '${m['name']} x${m['quantity']}',
                             style: const TextStyle(
                               color: AppTheme.textPrimary,
                               fontSize: 13,
@@ -555,7 +600,7 @@ class OrderTrackingScreen extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '₦${(itemMap['totalPrice'] as num).toStringAsFixed(0)}',
+                          '₦${(m['totalPrice'] as num).toStringAsFixed(0)}',
                           style: const TextStyle(
                             color: AppTheme.textPrimary,
                             fontSize: 13,
@@ -572,18 +617,17 @@ class OrderTrackingScreen extends StatelessWidget {
             );
           }),
 
-          // Totals
+          _buildTotalRow('Subtotal', '₦${subtotal.toStringAsFixed(0)}'),
+          const SizedBox(height: 6),
           _buildTotalRow(
-            'Subtotal',
-            '₦${(data['subtotal'] as num).toStringAsFixed(0)}',
+            'Service charge (3%)',
+            '₦${serviceCharge.toStringAsFixed(0)}',
           ),
           const SizedBox(height: 6),
           _buildTotalRow(
-            'Delivery fee',
-            '₦${(data['deliveryFee'] as num).toStringAsFixed(0)}',
+            'Delivery (picker fee)',
+            '₦${riderIncentive.toStringAsFixed(0)}',
           ),
-          const SizedBox(height: 6),
-          _buildTotalRow('Rider incentive', '₦150'),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 10),
             child: Divider(color: AppTheme.divider),
@@ -601,7 +645,7 @@ class OrderTrackingScreen extends StatelessWidget {
                 ),
               ),
               Text(
-                '₦${(data['total'] as num).toStringAsFixed(0)}',
+                '₦${total.toStringAsFixed(0)}',
                 style: const TextStyle(
                   color: AppTheme.primary,
                   fontSize: 16,
@@ -619,7 +663,6 @@ class OrderTrackingScreen extends StatelessWidget {
   Widget _buildShopStatusBadge(String status) {
     Color color;
     String label;
-
     switch (status) {
       case 'confirmed':
         color = AppTheme.primary;
@@ -637,7 +680,6 @@ class OrderTrackingScreen extends StatelessWidget {
         color = AppTheme.textSecondary;
         label = 'Pending';
     }
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -657,13 +699,7 @@ class OrderTrackingScreen extends StatelessWidget {
   }
 
   Widget _buildPaymentInfo(Map<String, dynamic> data) {
-    final method = data['paymentMethod'] ?? 'cash';
-    final methodLabel = method == 'cash'
-        ? 'Cash on Delivery'
-        : method == 'transfer'
-        ? 'Bank Transfer'
-        : 'Debit Card';
-
+    final isPaid = data['paymentStatus'] == 'paid';
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -687,22 +723,22 @@ class OrderTrackingScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Expanded(
+          const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Payment Method',
+                Text(
+                  'Payment',
                   style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 12,
                     fontFamily: 'Poppins',
                   ),
                 ),
-                const SizedBox(height: 2),
+                SizedBox(height: 2),
                 Text(
-                  methodLabel,
-                  style: const TextStyle(
+                  'Paystack',
+                  style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
@@ -715,17 +751,15 @@ class OrderTrackingScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: data['paymentStatus'] == 'paid'
+              color: isPaid
                   ? AppTheme.success.withOpacity(0.15)
                   : Colors.orange.withOpacity(0.15),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              data['paymentStatus'] == 'paid' ? 'Paid' : 'Pending',
+              isPaid ? '✓ Paid' : 'Pending',
               style: TextStyle(
-                color: data['paymentStatus'] == 'paid'
-                    ? AppTheme.success
-                    : Colors.orange,
+                color: isPaid ? AppTheme.success : Colors.orange,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
                 fontFamily: 'Poppins',
@@ -806,31 +840,45 @@ class OrderTrackingScreen extends StatelessWidget {
 
   Map<String, dynamic> _getStatusConfig(String status) {
     switch (status) {
+      case 'pending_payment':
+        return {
+          'title': 'Payment Processing...',
+          'subtitle': 'Completing your Paystack payment',
+          'icon': Icons.payment_rounded,
+          'color': Colors.orange,
+        };
       case 'pending':
         return {
           'title': 'Order Placed!',
-          'subtitle': 'Waiting for shops to confirm your order',
+          'subtitle': 'Waiting for shop confirmation',
           'icon': Icons.receipt_long_rounded,
           'color': Colors.orange,
         };
       case 'confirmed':
         return {
-          'title': 'Order Confirmed!',
+          'title': 'Order Confirmed! 🙌',
           'subtitle': 'Shops are preparing your items',
           'icon': Icons.storefront_rounded,
           'color': AppTheme.primary,
         };
+      case 'ready_for_pickup':
+        return {
+          'title': 'Ready for Pickup! 📦',
+          'subtitle': 'Items are packed, finding your rider',
+          'icon': Icons.inventory_2_rounded,
+          'color': AppTheme.primary,
+        };
       case 'rider_assigned':
         return {
-          'title': 'Rider Assigned!',
+          'title': 'Rider on the Way!',
           'subtitle': 'Your rider is heading to the shop',
           'icon': Icons.delivery_dining_rounded,
           'color': AppTheme.primary,
         };
       case 'out_for_delivery':
         return {
-          'title': 'On the Way!',
-          'subtitle': 'Your order is heading to you',
+          'title': 'Almost There! 🚀',
+          'subtitle': 'Your order is heading to you now',
           'icon': Icons.near_me_rounded,
           'color': AppTheme.primary,
         };
@@ -856,5 +904,48 @@ class OrderTrackingScreen extends StatelessWidget {
           'color': AppTheme.textSecondary,
         };
     }
+  }
+}
+
+// Animated pulsing dot for active step
+class _PulsingDot extends StatefulWidget {
+  @override
+  State<_PulsingDot> createState() => _PulsingDotState();
+}
+
+class _PulsingDotState extends State<_PulsingDot>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _animation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 900),
+      vsync: this,
+    )..repeat(reverse: true);
+    _animation = Tween<double>(begin: 0.4, end: 1.0).animate(_controller);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: _animation,
+      child: Container(
+        width: 8,
+        height: 8,
+        decoration: const BoxDecoration(
+          color: AppTheme.primary,
+          shape: BoxShape.circle,
+        ),
+      ),
+    );
   }
 }
