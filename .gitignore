@@ -47,3 +47,5 @@ functions/.env
 # Node.js (Firebase Functions)
 node_modules/
 functions/node_modules/
+android/app/src/main/AndroidManifest.xml
+ios/Runner/AppDelegate.swift

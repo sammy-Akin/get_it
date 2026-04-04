@@ -7,7 +7,10 @@ import 'package:http/http.dart' as http;
 
 class MapService {
   static const LatLng _defaultLocation = LatLng(6.5244, 3.3792); // Lagos
-  static const String _apiKey = 'AIzaSyBKBWfOo6QXex6Qfifks5CxGmIHYffAQjg';
+
+  // Firebase Cloud Function URLs
+  static const String _baseUrl =
+      'https://us-central1-getit-db879.cloudfunctions.net';
 
   Future<LatLng> getCurrentLocation() async {
     try {
@@ -33,51 +36,21 @@ class MapService {
 
   Future<LatLng?> geocodeAddress(String address) async {
     try {
-      if (kIsWeb) {
-        return await _geocodeWeb(address);
-      } else {
-        return await _geocodeMobile(address);
-      }
-    } catch (e) {
-      print('GEOCODE ERROR: $e');
-      return null;
-    }
-  }
-
-  Future<LatLng?> _geocodeWeb(String address) async {
-    try {
       final query = Uri.encodeComponent('$address, Nigeria');
-      final url =
-          'https://maps.googleapis.com/maps/api/geocode/json?address=$query&key=$_apiKey';
-
-      print('GEOCODE URL: $url');
+      final url = '$_baseUrl/geocode?address=$query';
       final response = await http.get(Uri.parse(url));
-      print('GEOCODE STATUS: ${response.statusCode}');
-      print('GEOCODE BODY: ${response.body}');
-
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         if (data['status'] == 'OK' && data['results'].isNotEmpty) {
           final loc = data['results'][0]['geometry']['location'];
           return LatLng(loc['lat'], loc['lng']);
-        } else {
-          print('GEOCODE API STATUS: ${data['status']}');
-          print('GEOCODE ERROR MSG: ${data['error_message']}');
         }
       }
       return null;
     } catch (e) {
-      print('GEOCODE WEB EXCEPTION: $e');
+      print('GEOCODE ERROR: $e');
       return null;
     }
-  }
-
-  Future<LatLng?> _geocodeMobile(String address) async {
-    final locations = await locationFromAddress('$address, Nigeria');
-    if (locations.isNotEmpty) {
-      return LatLng(locations.first.latitude, locations.first.longitude);
-    }
-    return null;
   }
 
   Future<String?> reverseGeocode(LatLng position) async {
@@ -94,8 +67,7 @@ class MapService {
 
   Future<String?> _reverseGeocodeWeb(LatLng position) async {
     final url =
-        'https://maps.googleapis.com/maps/api/geocode/json?latlng=${position.latitude},${position.longitude}&key=$_apiKey';
-
+        '$_baseUrl/reverseGeocode?latlng=${position.latitude},${position.longitude}';
     final response = await http.get(Uri.parse(url));
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
