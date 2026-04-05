@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -61,50 +62,60 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initLocation() async {
-    try {
-      // First check if user has a saved location in Firestore
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      if (uid != null) {
-        try {
-          final doc = await _firestore.collection('getit_users').doc(uid).get();
-          final data = doc.data();
-          if (data != null &&
-              data['deliveryLat'] != null &&
-              data['deliveryLng'] != null) {
-            if (mounted) {
-              setState(() {
-                _userLatLng = LatLng(
-                  (data['deliveryLat'] as num).toDouble(),
-                  (data['deliveryLng'] as num).toDouble(),
-                );
-                _locationLabel = data['deliveryAddress'] ?? 'My Location';
-                _locationLoading = false;
-              });
-            }
-            return;
+    // 1. Check Firestore for a previously saved delivery address
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      try {
+        final doc = await _firestore.collection('getit_users').doc(uid).get();
+        final data = doc.data();
+        if (data != null &&
+            data['deliveryLat'] != null &&
+            data['deliveryLng'] != null) {
+          if (mounted) {
+            setState(() {
+              _userLatLng = LatLng(
+                (data['deliveryLat'] as num).toDouble(),
+                (data['deliveryLng'] as num).toDouble(),
+              );
+              _locationLabel = data['deliveryAddress'] ?? 'My Location';
+              _locationLoading = false;
+            });
           }
-        } catch (_) {}
+          return; // saved address found, we're done
+        }
+      } catch (e) {
+        debugPrint('Firestore location fetch error: $e');
+      }
+    }
+
+    // 2. Fall back to GPS — set coordinates immediately without
+    //    waiting for reverse geocode so the UI never gets stuck
+    try {
+      final loc = await _mapService.getCurrentLocation();
+
+      if (mounted) {
+        setState(() {
+          _userLatLng = loc;
+          _locationLabel =
+              'Set your location'; // shown until reverse geocode returns
+          _locationLoading = false; // unblock UI right away
+        });
       }
 
-      // Fall back to GPS — don't reverse geocode on web to avoid errors
-      try {
-        final loc = await _mapService.getCurrentLocation();
-        if (mounted) {
-          setState(() {
-            _userLatLng = loc;
-            _locationLabel = 'Set your location';
-            _locationLoading = false;
+      // 3. Reverse geocode in the background — update label when ready
+      _mapService
+          .reverseGeocode(loc)
+          .then((address) {
+            if (address != null && mounted) {
+              setState(() => _locationLabel = _shortenAddress(address));
+            }
+          })
+          .catchError((e) {
+            debugPrint('reverseGeocode background error: $e');
+            // label stays as "Set your location" — that's fine
           });
-        }
-      } catch (_) {
-        if (mounted) {
-          setState(() {
-            _locationLabel = 'Set your location';
-            _locationLoading = false;
-          });
-        }
-      }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('GPS error: $e');
       if (mounted) {
         setState(() {
           _locationLabel = 'Set your location';
@@ -115,7 +126,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String _shortenAddress(String address) {
-    // Show only first 2 parts of address for header
     final parts = address.split(',');
     if (parts.length >= 2) {
       return '${parts[0].trim()}, ${parts[1].trim()}';
@@ -129,7 +139,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return name.isNotEmpty ? name.split(' ').first : 'there';
   }
 
-  // Cache nearby shop IDs for product filtering
   List<String> _nearbyShopIds = [];
 
   Future<void> _loadNearbyShopIds() async {
@@ -184,10 +193,9 @@ class _HomeScreenState extends State<HomeScreen> {
           setState(() {
             _locationLabel = _shortenAddress(address);
             _userLatLng = latLng;
-            _nearbyShopIds = []; // reset while reloading
+            _nearbyShopIds = [];
           });
           _loadNearbyShopIds();
-          // Save to Firestore
           final uid = FirebaseAuth.instance.currentUser?.uid;
           if (uid != null) {
             await _firestore.collection('getit_users').doc(uid).update({
@@ -251,7 +259,6 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Clickable location row
                 GestureDetector(
                   onTap: _openLocationSheet,
                   child: Row(
@@ -571,7 +578,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildFeaturedProducts() {
-    // Show shimmer while loading shop IDs
     if (_locationLoading || (_userLatLng != null && _nearbyShopIds.isEmpty)) {
       return _buildHorizontalShimmer(height: 160);
     }
@@ -599,7 +605,6 @@ class _HomeScreenState extends State<HomeScreen> {
             )
             .toList();
 
-        // Filter by nearby shops
         if (_nearbyShopIds.isNotEmpty) {
           products = products
               .where((p) => _nearbyShopIds.contains(p.shopId))
@@ -610,7 +615,6 @@ class _HomeScreenState extends State<HomeScreen> {
           return _buildEmptyState('No products near you yet');
         }
 
-        // Limit to 6 for featured
         final featured = products.take(6).toList();
 
         return SizedBox(
@@ -636,7 +640,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildProductsGrid() {
-    // Show shimmer while loading shop IDs
     if (_locationLoading || (_userLatLng != null && _nearbyShopIds.isEmpty)) {
       return _buildGridShimmer();
     }
@@ -660,14 +663,12 @@ class _HomeScreenState extends State<HomeScreen> {
             )
             .toList();
 
-        // Filter by nearby shops
         if (_nearbyShopIds.isNotEmpty) {
           products = products
               .where((p) => _nearbyShopIds.contains(p.shopId))
               .toList();
         }
 
-        // Search filter
         if (_searchQuery.isNotEmpty) {
           final q = _searchQuery.toLowerCase();
           products = products
@@ -707,7 +708,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildNearbyShops() {
-    // If location not yet detected, show shimmer
     if (_locationLoading) {
       return _buildHorizontalShimmer(height: 180);
     }
@@ -852,7 +852,7 @@ class _HomeScreenState extends State<HomeScreen> {
           shop.latitude,
           shop.longitude,
         );
-        return distance <= 800; // ~10 min walk (80m/min)
+        return distance <= 800;
       }).toList();
 
       nearbyByCoords.sort((a, b) {
@@ -873,7 +873,6 @@ class _HomeScreenState extends State<HomeScreen> {
       result.addAll(nearbyByCoords);
     }
 
-    // Text-based matching for shops without coordinates
     if (_locationLabel.isNotEmpty &&
         _locationLabel != 'Set your location' &&
         _locationLabel != 'Detecting location...') {
@@ -896,7 +895,6 @@ class _HomeScreenState extends State<HomeScreen> {
       result.addAll(textMatched.where((s) => !existingIds.contains(s.id)));
     }
 
-    // If no results and no user location, show all shops
     if (result.isEmpty && _userLatLng == null) return allShops;
 
     return result;
@@ -1005,7 +1003,10 @@ class _LocationSheetState extends State<_LocationSheet> {
   Timer? _debounce;
   List<Map<String, String>> _acSuggestions = [];
 
-  static const String _apiKey = 'AIzaSyBKBWfOo6QXex6Qfifks5CxGmIHYffAQjg';
+  static const String _autocompleteUrl =
+      'https://placesautocomplete-3vduh2j6xq-uc.a.run.app';
+  static const String _placeDetailsUrl =
+      'https://placedetails-3vduh2j6xq-uc.a.run.app';
 
   final List<String> _popularAreas = [
     'Gowon Estate, Lagos',
@@ -1046,9 +1047,7 @@ class _LocationSheetState extends State<_LocationSheet> {
   Future<void> _fetchSuggestions(String input) async {
     try {
       final encoded = Uri.encodeComponent('$input Nigeria');
-      final url =
-          'https://maps.googleapis.com/maps/api/place/autocomplete/json'
-          '?input=$encoded&key=$_apiKey&components=country:ng&language=en';
+      final url = '$_autocompleteUrl?input=$encoded';
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200 && mounted) {
         final data = json.decode(response.body);
@@ -1067,7 +1066,9 @@ class _LocationSheetState extends State<_LocationSheet> {
           });
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Autocomplete error: $e');
+    }
   }
 
   Future<void> _selectSuggestion(Map<String, String> s) async {
@@ -1081,9 +1082,7 @@ class _LocationSheetState extends State<_LocationSheet> {
     });
 
     try {
-      final url =
-          'https://maps.googleapis.com/maps/api/place/details/json'
-          '?place_id=$placeId&fields=geometry&key=$_apiKey';
+      final url = '$_placeDetailsUrl?place_id=$placeId';
       final res = await http.get(Uri.parse(url));
       if (res.statusCode == 200) {
         final data = json.decode(res.body);
@@ -1099,7 +1098,9 @@ class _LocationSheetState extends State<_LocationSheet> {
           return;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Place details error: $e');
+    }
 
     // Fallback geocode
     final latLng = await widget.mapService.geocodeAddress(description);
@@ -1174,7 +1175,6 @@ class _LocationSheetState extends State<_LocationSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Handle bar
           Center(
             child: Container(
               width: 40,
@@ -1186,7 +1186,6 @@ class _LocationSheetState extends State<_LocationSheet> {
             ),
           ),
           const SizedBox(height: 20),
-
           const Text(
             'Deliver to',
             style: TextStyle(
@@ -1205,10 +1204,7 @@ class _LocationSheetState extends State<_LocationSheet> {
               fontFamily: 'Poppins',
             ),
           ),
-
           const SizedBox(height: 16),
-
-          // Search field
           Container(
             decoration: BoxDecoration(
               color: AppTheme.surfaceLight,
@@ -1263,8 +1259,6 @@ class _LocationSheetState extends State<_LocationSheet> {
               textInputAction: TextInputAction.search,
             ),
           ),
-
-          // Autocomplete suggestions — inline like Chowdeck
           if (_acSuggestions.isNotEmpty) ...[
             const SizedBox(height: 4),
             Container(
@@ -1324,7 +1318,6 @@ class _LocationSheetState extends State<_LocationSheet> {
               ),
             ),
           ],
-
           if (_error != null) ...[
             const SizedBox(height: 8),
             Row(
@@ -1348,10 +1341,7 @@ class _LocationSheetState extends State<_LocationSheet> {
               ],
             ),
           ],
-
           const SizedBox(height: 16),
-
-          // Use current location
           GestureDetector(
             onTap: _useCurrentLocation,
             child: Container(
@@ -1397,8 +1387,6 @@ class _LocationSheetState extends State<_LocationSheet> {
               ),
             ),
           ),
-
-          // Only show popular areas when not searching
           if (_acSuggestions.isEmpty) ...[
             const SizedBox(height: 20),
             const Text(
@@ -1452,7 +1440,6 @@ class _LocationSheetState extends State<_LocationSheet> {
               }).toList(),
             ),
           ],
-
           const SizedBox(height: 8),
         ],
       ),
@@ -1610,8 +1597,9 @@ class _QuickAddSheetState extends State<_QuickAddSheet> {
                   onPressed: widget.product.stockQty == 0
                       ? null
                       : () {
-                          for (int i = 0; i < _qty; i++)
+                          for (int i = 0; i < _qty; i++) {
                             cart.addItem(widget.product);
+                          }
                           Navigator.pop(context);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(

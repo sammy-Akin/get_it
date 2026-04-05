@@ -36,7 +36,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   bool _showSuggestions = false;
   Timer? _debounce;
 
-  static const String _apiKey = 'AIzaSyBKBWfOo6QXex6Qfifks5CxGmIHYffAQjg';
+  static const String _baseUrl =
+      'https://us-central1-getit-db879.cloudfunctions.net';
 
   @override
   void initState() {
@@ -84,8 +85,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   Future<void> _fetchSuggestions(String input) async {
     try {
       final encoded = Uri.encodeComponent('$input Nigeria');
-      final url =
-          'https://maps.googleapis.com/maps/api/place/autocomplete/json?input=$encoded&key=$_apiKey&components=country:ng&language=en';
+      final url = '$_baseUrl/placesAutocomplete?input=$encoded';
 
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200 && mounted) {
@@ -121,8 +121,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
 
     try {
       // Get coordinates from place_id
-      final url =
-          'https://maps.googleapis.com/maps/api/place/details/json?place_id=$placeId&fields=geometry&key=$_apiKey';
+      final url = '$_baseUrl/placeDetails?place_id=$placeId';
       final response = await http.get(Uri.parse(url));
 
       if (response.statusCode == 200) {
