@@ -12,6 +12,9 @@ class CartItem {
 class CartModel {
   final Map<String, CartItem> _items = {};
 
+  // Distance in km set externally before checkout
+  double deliveryDistanceKm = 0;
+
   Map<String, CartItem> get items => Map.unmodifiable(_items);
   List<CartItem> get itemList => _items.values.toList();
   int get totalItems =>
@@ -23,11 +26,18 @@ class CartModel {
   double get serviceCharge =>
       double.parse((subtotal * 0.03).toStringAsFixed(2));
 
-  // No separate delivery fee — picker incentive covers delivery
   double get deliveryFee => 0;
 
-  // ₦150 picker incentive — this IS the delivery cost
-  double get riderIncentive => _items.isEmpty ? 0 : 150;
+  // Distance-based picker incentive:
+  // 0–0.5km  → ₦150
+  // 0.5–1km  → ₦200
+  // >1km     → ₦250
+  double get riderIncentive {
+    if (_items.isEmpty) return 0;
+    if (deliveryDistanceKm <= 0.5) return 150;
+    if (deliveryDistanceKm <= 1.0) return 200;
+    return 250;
+  }
 
   double get total =>
       _items.isEmpty ? 0 : subtotal + serviceCharge + riderIncentive;

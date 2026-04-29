@@ -83,7 +83,7 @@ class _VendorOrdersScreenState extends State<VendorOrdersScreen>
           ),
           _VendorOrdersList(
             vendorId: _uid,
-            shopStatuses: const ['picked_up', 'cancelled'],
+            shopStatuses: const ['assigned', 'picked_up', 'cancelled'],
             emptyMessage: 'No completed orders',
             emptySubtext: 'Fulfilled orders will show here',
             emptyIcon: Icons.receipt_long_outlined,
@@ -111,12 +111,6 @@ class _VendorOrdersList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // ── KEY FIX ──────────────────────────────────────────────────────────────
-    // Removed .orderBy('createdAt') because combining it with
-    // .where('paymentStatus') requires a composite Firestore index.
-    // Without the index the query silently returns nothing.
-    // We sort client-side instead — same result, no index needed.
-    // ─────────────────────────────────────────────────────────────────────────
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('getit_orders')
@@ -132,7 +126,6 @@ class _VendorOrdersList extends StatelessWidget {
 
         final allDocs = snapshot.data?.docs ?? [];
 
-        // Filter: must contain this vendor AND shop status matches
         final vendorOrders = allDocs.where((doc) {
           final data = doc.data() as Map<String, dynamic>;
           final shops = data['shops'] as Map<String, dynamic>? ?? {};
@@ -142,10 +135,11 @@ class _VendorOrdersList extends StatelessWidget {
           return shopStatuses.contains(shopStatus);
         }).toList();
 
-        // Sort client-side by createdAt descending
         vendorOrders.sort((a, b) {
-          final aT = (a.data() as Map)['createdAt'] as Timestamp?;
-          final bT = (b.data() as Map)['createdAt'] as Timestamp?;
+          final aT =
+              (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
+          final bT =
+              (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
           if (aT == null || bT == null) return 0;
           return bT.compareTo(aT);
         });
@@ -297,11 +291,15 @@ class _VendorOrderCardState extends State<_VendorOrderCard> {
         final allReady = allShops.values.every(
           (s) => (s as Map<String, dynamic>)['status'] == 'ready',
         );
+
         if (allReady) {
-          await orderRef.update({'status': 'ready_for_pickup'});
+          await orderRef.update({
+            'status': 'ready_for_pickup',
+          }); // ← Cloud Function picks it up
         }
       }
     } catch (e) {
+      debugPrint('🚨 _updateShopStatus error: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -309,6 +307,138 @@ class _VendorOrderCardState extends State<_VendorOrderCard> {
       }
     } finally {
       if (mounted) setState(() => _isUpdating = false);
+    }
+  }
+
+  Future<void> _assignNearestPicker(
+    DocumentReference orderRef,
+    Map<String, dynamic> orderData,
+  ) async {
+    try {
+      final pickersSnap = await FirebaseFirestore.instance
+          .collection('getit_riders')
+          .where('isAvailable', isEqualTo: true)
+          .get();
+
+      debugPrint(
+        '🔍 [A] getit_riders query returned: ${pickersSnap.docs.length} docs',
+      );
+
+      for (final doc in pickersSnap.docs) {
+        final d = doc.data();
+        debugPrint(
+          'Rider ${doc.id}: isAvailable=${d['isAvailable']}, '
+          'currentOrderId=${d['currentOrderId']}',
+        );
+      }
+
+      final availablePickers = pickersSnap.docs.where((doc) {
+        final data = doc.data();
+        final currentOrderId = data['currentOrderId'] as String?;
+        return currentOrderId == null || currentOrderId.isEmpty;
+      }).toList();
+
+      debugPrint(
+        '🔍 [A] Free pickers after filter: ${availablePickers.length}',
+      );
+
+      if (availablePickers.isEmpty) {
+        await orderRef.update({
+          'status': 'ready_for_pickup',
+          'assignedAt': FieldValue.serverTimestamp(),
+        });
+        debugPrint('⚠️ No pickers available — set to ready_for_pickup');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                '⚠️ No riders available right now. Order marked as ready.',
+                style: TextStyle(fontFamily: 'Poppins'),
+              ),
+              backgroundColor: Colors.orange,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+        return;
+      }
+
+      availablePickers.sort((a, b) {
+        final aData = a.data();
+        final bData = b.data();
+        final aT = aData['locationUpdatedAt'] as Timestamp?;
+        final bT = bData['locationUpdatedAt'] as Timestamp?;
+        if (aT == null || bT == null) return 0;
+        return bT.compareTo(aT);
+      });
+
+      final pickerDoc = availablePickers.first;
+      final pickerId = pickerDoc.id;
+      final pickerData = pickerDoc.data();
+      final pickerName =
+          pickerData['name'] ?? pickerData['displayName'] ?? 'Rider';
+
+      debugPrint(
+        '🔍 [B] Assigning pickerId=$pickerId to orderId=${orderRef.id}',
+      );
+
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final freshOrder = await transaction.get(orderRef);
+        final freshOrderData = freshOrder.data() as Map<String, dynamic>?;
+
+        final currentPickerId = freshOrderData?['pickerId'] as String?;
+        if (currentPickerId != null && currentPickerId.isNotEmpty) {
+          debugPrint('⚠️ Picker already assigned: $currentPickerId — aborting');
+          return;
+        }
+
+        final riderRef = FirebaseFirestore.instance
+            .collection('getit_riders')
+            .doc(pickerId);
+
+        final freshRider = await transaction.get(riderRef);
+        final riderCurrentOrder =
+            (freshRider.data())?['currentOrderId'] as String?;
+
+        if (riderCurrentOrder != null && riderCurrentOrder.isNotEmpty) {
+          debugPrint('⚠️ Rider already busy — skipping');
+          return;
+        }
+
+        // ✅ Build shop assigned updates atomically inside the transaction
+        final allShops =
+            freshOrderData?['shops'] as Map<String, dynamic>? ?? {};
+        final Map<String, dynamic> shopAssignedUpdates = {};
+        for (final shopId in allShops.keys) {
+          shopAssignedUpdates['shops.$shopId.status'] = 'assigned';
+        }
+
+        transaction.update(orderRef, {
+          ...shopAssignedUpdates,
+          'pickerId': pickerId,
+          'pickerName': pickerName,
+          'pickerEarning': 150,
+          'status': 'assigned',
+          'assignedAt': FieldValue.serverTimestamp(),
+        });
+
+        transaction.update(riderRef, {
+          'currentOrderId': orderRef.id,
+          'isAvailable': false,
+        });
+      });
+
+      debugPrint('✅ Transaction completed — verifying...');
+      final verify = await orderRef.get();
+      final verifyData = verify.data() as Map<String, dynamic>?;
+      debugPrint(
+        '🔍 Post-transaction — status: ${verifyData?['status']}, '
+        'pickerId: ${verifyData?['pickerId']}',
+      );
+    } catch (e) {
+      debugPrint('🚨 _assignNearestPicker error: $e');
+      await orderRef.update({'status': 'ready_for_pickup'});
+      rethrow;
     }
   }
 
@@ -392,7 +522,7 @@ class _VendorOrderCardState extends State<_VendorOrderCard> {
       ),
       child: Column(
         children: [
-          // Header
+          // ── Header ──────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
             child: Row(
@@ -428,7 +558,7 @@ class _VendorOrderCardState extends State<_VendorOrderCard> {
 
           const Divider(height: 1, color: AppTheme.divider),
 
-          // Items
+          // ── Items ────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
             child: Column(
@@ -514,7 +644,7 @@ class _VendorOrderCardState extends State<_VendorOrderCard> {
             ),
           ),
 
-          // Delivery address
+          // ── Delivery address ─────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
             child: Row(
@@ -540,7 +670,7 @@ class _VendorOrderCardState extends State<_VendorOrderCard> {
             ),
           ),
 
-          // Actions
+          // ── Actions ──────────────────────────────────────────────────
           if (isPending) ...[
             const Divider(height: 1, color: AppTheme.divider),
             Padding(
@@ -649,6 +779,41 @@ class _VendorOrderCardState extends State<_VendorOrderCard> {
             ),
           ],
 
+          if (shopStatus == 'assigned') ...[
+            const Divider(height: 1, color: AppTheme.divider),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.05),
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(16),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.delivery_dining_rounded,
+                    color: AppTheme.primary,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.data['pickerName'] != null
+                        ? 'Rider ${widget.data['pickerName']} is on the way'
+                        : 'Rider assigned — on the way',
+                    style: const TextStyle(
+                      color: AppTheme.primary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
           if (shopStatus == 'ready') ...[
             const Divider(height: 1, color: AppTheme.divider),
             Container(
@@ -670,6 +835,39 @@ class _VendorOrderCardState extends State<_VendorOrderCard> {
                   SizedBox(width: 8),
                   Text(
                     'Waiting for rider to pick up',
+                    style: TextStyle(
+                      color: AppTheme.success,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      fontFamily: 'Poppins',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          if (shopStatus == 'picked_up') ...[
+            const Divider(height: 1, color: AppTheme.divider),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.success.withOpacity(0.05),
+                borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(16),
+                ),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.check_circle_rounded,
+                    color: AppTheme.success,
+                    size: 16,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Order picked up — delivering now',
                     style: TextStyle(
                       color: AppTheme.success,
                       fontSize: 13,
@@ -716,6 +914,10 @@ class _StatusBadge extends StatelessWidget {
       case 'ready':
         color = AppTheme.success;
         label = '✓ Ready';
+        break;
+      case 'assigned':
+        color = AppTheme.primary;
+        label = 'Rider Assigned';
         break;
       case 'picked_up':
         color = AppTheme.success;

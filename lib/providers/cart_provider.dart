@@ -14,6 +14,11 @@ class CartProvider extends ChangeNotifier {
   double get riderIncentive => _cart.riderIncentive;
   double get total => _cart.total;
 
+  void setDeliveryDistance(double km) {
+    _cart.deliveryDistanceKm = km;
+    notifyListeners();
+  }
+
   void addItem(ProductModel product) {
     _cart.addItem(product);
     notifyListeners();

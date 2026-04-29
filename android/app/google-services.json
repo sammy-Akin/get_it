@@ -12,7 +12,20 @@
           "package_name": "com.example.get_it"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "347991149828-gmu931n0c0h58frpp8i04q534j1bep0s.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.get_it",
+            "certificate_hash": "ada15d8568488f52f85c4746b28ec5f30dca0966"
+          }
+        },
+        {
+          "client_id": "347991149828-b7t847goac1mqol1rpjl40n9uv5p8sjn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyAAEkbVzAH_nPe2Q6ofFxS7qHTSNufYGlg"
@@ -20,7 +33,71 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "347991149828-b7t847goac1mqol1rpjl40n9uv5p8sjn.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "347991149828-39b72a4n3iih0vv0lo6u4e2ovhj4bhmt.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.getIt"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:347991149828:android:96c872816f17af7e90d451",
+        "android_client_info": {
+          "package_name": "ng.getit.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "347991149828-ajsmbiuevl0f4vq1lmhoe18762hr8jan.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ng.getit.app",
+            "certificate_hash": "ada15d8568488f52f85c4746b28ec5f30dca0966"
+          }
+        },
+        {
+          "client_id": "347991149828-u201tki5m7je1gqjl50qvlahuvsbflmv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ng.getit.app",
+            "certificate_hash": "dec30d65cb48e96b0158d9ce2e29858d38eccee8"
+          }
+        },
+        {
+          "client_id": "347991149828-b7t847goac1mqol1rpjl40n9uv5p8sjn.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAEkbVzAH_nPe2Q6ofFxS7qHTSNufYGlg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "347991149828-b7t847goac1mqol1rpjl40n9uv5p8sjn.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "347991149828-39b72a4n3iih0vv0lo6u4e2ovhj4bhmt.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.getIt"
+              }
+            }
+          ]
         }
       }
     }

@@ -1,16 +1,48 @@
-// lib/main.dart
-
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:get_it/providers/cart_provider.dart';
 import 'package:provider/provider.dart';
 import 'core/theme.dart';
 import 'core/app_router.dart';
 import 'firebase_options.dart';
+import 'services/notification_service.dart';
+
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await NotificationService.instance.initialize();
+  await NotificationService.instance.showOrderNotification(
+    title: message.notification?.title ?? 'Get It',
+    body: message.notification?.body ?? '',
+    payload: message.data['type'] ?? '',
+  );
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  if (!kIsWeb) {
+    FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+    PlatformDispatcher.instance.onError = (error, stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
+  }
+
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
+
+  try {
+    await NotificationService.instance.initialize();
+  } catch (e) {
+    debugPrint('Notification init failed: $e');
+  }
+
   runApp(const GetItApp());
 }
 
@@ -45,8 +77,6 @@ class _ResponsiveWrapper extends StatelessWidget {
 
     if (isMobile) return child;
 
-    // On tablets/desktop — show app centered like a phone
-    // with a subtle background
     const appWidth = 420.0;
 
     return Scaffold(

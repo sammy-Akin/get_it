@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   // Colors
@@ -32,58 +31,66 @@ class AppTheme {
         onBackground: textPrimary,
         onSurface: textPrimary,
       ),
-      textTheme: GoogleFonts.poppinsTextTheme(
-        const TextTheme(
-          displayLarge: TextStyle(
-            color: textPrimary,
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
-          ),
-          displayMedium: TextStyle(
-            color: textPrimary,
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-          ),
-          headlineLarge: TextStyle(
-            color: textPrimary,
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-          ),
-          headlineMedium: TextStyle(
-            color: textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
-          headlineSmall: TextStyle(
-            color: textPrimary,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-          titleLarge: TextStyle(
-            color: textPrimary,
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
-          titleMedium: TextStyle(
-            color: textPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-          bodyLarge: TextStyle(
-            color: textPrimary,
-            fontSize: 16,
-            fontWeight: FontWeight.normal,
-          ),
-          bodyMedium: TextStyle(
-            color: textSecondary,
-            fontSize: 14,
-            fontWeight: FontWeight.normal,
-          ),
-          labelLarge: TextStyle(
-            color: textPrimary,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+      textTheme: const TextTheme(
+        displayLarge: TextStyle(
+          color: textPrimary,
+          fontSize: 32,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Poppins',
+        ),
+        displayMedium: TextStyle(
+          color: textPrimary,
+          fontSize: 28,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Poppins',
+        ),
+        headlineLarge: TextStyle(
+          color: textPrimary,
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+          fontFamily: 'Poppins',
+        ),
+        headlineMedium: TextStyle(
+          color: textPrimary,
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          fontFamily: 'Poppins',
+        ),
+        headlineSmall: TextStyle(
+          color: textPrimary,
+          fontSize: 18,
+          fontWeight: FontWeight.w600,
+          fontFamily: 'Poppins',
+        ),
+        titleLarge: TextStyle(
+          color: textPrimary,
+          fontSize: 16,
+          fontWeight: FontWeight.w600,
+          fontFamily: 'Poppins',
+        ),
+        titleMedium: TextStyle(
+          color: textPrimary,
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          fontFamily: 'Poppins',
+        ),
+        bodyLarge: TextStyle(
+          color: textPrimary,
+          fontSize: 16,
+          fontWeight: FontWeight.normal,
+          fontFamily: 'Poppins',
+        ),
+        bodyMedium: TextStyle(
+          color: textSecondary,
+          fontSize: 14,
+          fontWeight: FontWeight.normal,
+          fontFamily: 'Poppins',
+        ),
+        labelLarge: TextStyle(
+          color: textPrimary,
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+          fontFamily: 'Poppins',
         ),
       ),
       appBarTheme: const AppBarTheme(

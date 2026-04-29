@@ -1,11 +1,13 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart'
+    show debugPrint, kIsWeb, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -60,10 +62,53 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           if (data['phone'] != null) {
             _phoneController.text = data['phone'];
           }
+
+          // Calculate delivery distance if user has saved coords
+          if (data['deliveryLat'] != null && data['deliveryLng'] != null) {
+            final userLat = (data['deliveryLat'] as num).toDouble();
+            final userLng = (data['deliveryLng'] as num).toDouble();
+            await _calculateAndSetDeliveryDistance(userLat, userLng);
+          }
         }
       }
     } catch (_) {}
     if (mounted) setState(() => _isLoading = false);
+  }
+
+  Future<void> _calculateAndSetDeliveryDistance(
+    double userLat,
+    double userLng,
+  ) async {
+    try {
+      final cart = context.read<CartProvider>();
+      final shopIds = cart.cart.itemsByShop.keys.toList();
+      if (shopIds.isEmpty) return;
+
+      // Get the first shop's location from Firestore
+      final shopDoc = await _firestore
+          .collection('getit_vendors')
+          .doc(shopIds.first)
+          .get();
+      final shopData = shopDoc.data();
+      if (shopData == null) return;
+
+      final shopLat = (shopData['latitude'] as num?)?.toDouble() ?? 0;
+      final shopLng = (shopData['longitude'] as num?)?.toDouble() ?? 0;
+      if (shopLat == 0 || shopLng == 0) return;
+
+      final distanceMeters = Geolocator.distanceBetween(
+        userLat,
+        userLng,
+        shopLat,
+        shopLng,
+      );
+      final distanceKm = distanceMeters / 1000;
+
+      cart.setDeliveryDistance(distanceKm);
+      debugPrint('Delivery distance: ${distanceKm.toStringAsFixed(2)}km');
+    } catch (e) {
+      debugPrint('Distance calculation failed: $e');
+    }
   }
 
   Future<void> _pay(CartProvider cart) async {
@@ -82,8 +127,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final email = user.email ?? '${user.uid}@getit.ng';
       final amountKobo = (cart.total * 100).toInt();
 
-      // 1. Save order as pending_payment
-      //    Vendor will NOT see this until paymentStatus == 'paid'
       final itemsByShop = cart.cart.itemsByShop;
       final Map<String, dynamic> shopsData = {};
       for (final entry in itemsByShop.entries) {
@@ -121,11 +164,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         'riderIncentive': cart.riderIncentive,
         'total': cart.total,
         'riderId': null,
+        'vendorIds': itemsByShop.keys.toList(),
         'shops': shopsData,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 2. Get Paystack checkout URL from Cloud Function
       final response = await http.post(
         Uri.parse(
           'https://us-central1-getit-db879.cloudfunctions.net/initializePayment',
@@ -140,7 +183,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       );
 
       if (response.statusCode != 200) {
-        // Clean up order if we can't get payment URL
         await _firestore.collection('getit_orders').doc(orderId).delete();
         if (mounted) {
           setState(() => _isPlacingOrder = false);
@@ -158,24 +200,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
       if (mounted) setState(() => _isPlacingOrder = false);
 
-      // 3. Open payment — Android uses WebView, Web uses redirect
       if (!mounted) return;
 
       if (kIsWeb) {
-        // Web: redirect in same tab — Paystack will redirect back to /payment/callback
-        // Store cart data in Firestore so callback can clear it
         await _firestore.collection('getit_users').doc(user.uid).update({
           'pendingOrderId': orderId,
         });
-        // Clear cart now — callback screen will handle confirmation
         cart.clear();
-        // Redirect to Paystack in same tab
         await launchUrl(
           Uri.parse(checkoutUrl),
           mode: LaunchMode.platformDefault,
         );
       } else {
-        // Android: open Paystack in WebView — stays in app
         final paid = await Navigator.push<bool>(
           context,
           MaterialPageRoute(
@@ -185,7 +221,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         );
 
         if (paid == true && mounted) {
-          // Confirm the order
           await _firestore.collection('getit_orders').doc(orderId).update({
             'paymentStatus': 'paid',
             'status': 'confirmed',
@@ -194,7 +229,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           cart.clear();
           if (mounted) context.go('/order/$orderId');
         } else {
-          // Cancelled — delete the pending order silently
           await _firestore.collection('getit_orders').doc(orderId).delete();
         }
       }
@@ -523,10 +557,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             '₦${cart.serviceCharge.toStringAsFixed(0)}',
           ),
           const SizedBox(height: 8),
-          _row(
-            'Delivery (picker fee)',
-            '₦${cart.riderIncentive.toStringAsFixed(0)}',
-          ),
+          _row('Delivery fee', '₦${cart.riderIncentive.toStringAsFixed(0)}'),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
             child: Divider(color: AppTheme.divider),
@@ -632,8 +663,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 }
 
 // ─── Paystack WebView — Android only ─────────────────────────────────────────
-// Loads the Paystack checkout URL directly in a WebView
-// Detects success/cancel via URL patterns
 
 class _PaystackWebView extends StatefulWidget {
   final String checkoutUrl;
@@ -664,7 +693,6 @@ class _PaystackWebViewState extends State<_PaystackWebView> {
           onPageStarted: (url) {
             debugPrint('WebView navigating to: $url');
 
-            // Paystack success — the callback_url we set in initializePayment
             if (url.contains('getit-db879.web.app/payment/callback') ||
                 url.contains('trxref=') ||
                 url.contains('reference=')) {
@@ -672,7 +700,6 @@ class _PaystackWebViewState extends State<_PaystackWebView> {
               return;
             }
 
-            // Paystack cancel — user tapped close/back on Paystack page
             if (url.contains('paystack.com/close') ||
                 url.contains('close=true')) {
               Navigator.pop(context, false);

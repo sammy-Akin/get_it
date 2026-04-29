@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_sign_in/google_sign_in.dart';
@@ -66,15 +67,36 @@ class AuthService {
 
   Future<UserCredential?> signInWithGoogle() async {
     try {
-      final googleProvider = GoogleAuthProvider()
-        ..addScope('email')
-        ..addScope('profile');
-
       late UserCredential userCredential;
+
       if (kIsWeb) {
+        final googleProvider = GoogleAuthProvider()
+          ..addScope('email')
+          ..addScope('profile');
         userCredential = await _auth.signInWithPopup(googleProvider);
       } else {
-        userCredential = await _auth.signInWithProvider(googleProvider);
+        // Step 1: Authenticate — shows the Google account picker
+        final GoogleSignInAccount googleUser = await GoogleSignIn.instance
+            .authenticate();
+
+        // Step 2: Get client authorization (access token) for the required scopes.
+        // Try silently first; fall back to interactive if not yet authorized.
+        final authorization =
+            await googleUser.authorizationClient.authorizationForScopes([
+              'email',
+              'profile',
+            ]) ??
+            await googleUser.authorizationClient.authorizeScopes([
+              'email',
+              'profile',
+            ]);
+
+        // Step 3: Build the Firebase credential using the access token
+        final oauthCredential = GoogleAuthProvider.credential(
+          accessToken: authorization.accessToken,
+        );
+
+        userCredential = await _auth.signInWithCredential(oauthCredential);
       }
 
       await _saveUserToFirestore(
@@ -86,6 +108,9 @@ class AuthService {
       );
 
       return userCredential;
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) return null;
+      throw 'Google Sign-In failed: ${e.description}';
     } on FirebaseAuthException catch (e) {
       throw _handleAuthException(e);
     } catch (e) {
@@ -103,6 +128,8 @@ class AuthService {
 
   Future<void> signOut() async {
     try {
+      // signOut (not disconnect) ends the session without revoking access,
+      // allowing users to sign back in smoothly.
       await GoogleSignIn.instance.signOut();
     } catch (_) {}
     await _auth.signOut();
@@ -130,7 +157,7 @@ class AuthService {
     final userDoc = await userRef.get();
 
     if (!userDoc.exists) {
-      final data = {
+      final data = <String, dynamic>{
         'uid': uid,
         'fullName': fullName,
         'email': email,
@@ -149,7 +176,6 @@ class AuthService {
 
       await userRef.set(data);
 
-      // If vendor, also create getit_vendors doc
       if (role == 'vendor') {
         await _firestore.collection('getit_vendors').doc(uid).set({
           'id': uid,
@@ -167,7 +193,6 @@ class AuthService {
         });
       }
 
-      // If picker, also create getit_riders doc
       if (role == 'picker') {
         await _firestore.collection('getit_riders').doc(uid).set({
           'id': uid,

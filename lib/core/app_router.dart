@@ -13,7 +13,7 @@ import 'package:get_it/screens/search_screen.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html show window;
+
 import '../screens/splash_screen.dart';
 import '../screens/onboarding_screen.dart';
 import '../screens/shop/shop_screen.dart';
@@ -33,7 +33,9 @@ class AppRouter {
   /// This prevents SplashScreen from running and navigating to /home.
   static String _getInitialLocation() {
     if (kIsWeb) {
-      final uri = Uri.parse(html.window.location.href);
+      // ignore: undefined_name
+      final href = Uri.base.toString();
+      final uri = Uri.parse(href);
       if (uri.path.contains('/payment/callback')) {
         return '${uri.path}${uri.query.isNotEmpty ? '?${uri.query}' : ''}';
       }

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/theme.dart';
+import '../../services/notification_service.dart';
 import 'vendor_orders_screen.dart';
 import 'vendor_products_screen.dart';
 import 'vendor_profile_screen.dart';
@@ -19,6 +21,9 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   bool _isOpen = true;
   bool _isToggling = false;
 
+  StreamSubscription<QuerySnapshot>? _orderSubscription;
+  String? _lastKnownLatestOrderId; // tracks last seen order
+
   final List<Widget> _screens = [
     const VendorOrdersScreen(),
     const VendorProductsScreen(),
@@ -29,6 +34,224 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
   void initState() {
     super.initState();
     _loadShopStatus();
+    _listenForNewOrders();
+  }
+
+  @override
+  void dispose() {
+    _orderSubscription?.cancel();
+    super.dispose();
+  }
+
+  /// Listens for new orders in real-time.
+  /// On first load, sets baseline. After that, any new order triggers alert.
+  void _listenForNewOrders() {
+    debugPrint('🔍 Starting order listener for vendor: $_uid');
+
+    _orderSubscription = FirebaseFirestore.instance
+        .collection('getit_orders')
+        .where('vendorIds', arrayContains: _uid)
+        .where('paymentStatus', isEqualTo: 'paid')
+        .orderBy('createdAt', descending: true)
+        .limit(1)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            debugPrint(
+              '📦 Snapshot received. Docs count: ${snapshot.docs.length}',
+            );
+
+            if (snapshot.docs.isEmpty) {
+              debugPrint('❌ No docs — listener works but no matching orders');
+              return;
+            }
+
+            final latestDoc = snapshot.docs.first;
+            final latestId = latestDoc.id;
+            debugPrint('✅ Latest order id: $latestId');
+            debugPrint('📋 Order data: ${latestDoc.data()}');
+
+            if (_lastKnownLatestOrderId == null) {
+              _lastKnownLatestOrderId = latestId;
+              debugPrint('🔖 Baseline set: $latestId');
+              return;
+            }
+
+            if (latestId != _lastKnownLatestOrderId) {
+              debugPrint('🆕 NEW ORDER DETECTED: $latestId');
+              _lastKnownLatestOrderId = latestId;
+              final data = latestDoc.data();
+              final buyerName = data['customerName'] ?? 'A customer';
+              final total = (data['total'] as num?)?.toDouble() ?? 0.0;
+              _onNewOrderReceived(
+                buyerName: buyerName,
+                total: total,
+                orderId: latestId,
+              );
+            } else {
+              debugPrint('🔁 Same order as baseline, no alert needed');
+            }
+          },
+          onError: (error) {
+            debugPrint('🚨 LISTENER ERROR: $error');
+          },
+        );
+  }
+
+  void _onNewOrderReceived({
+    required String buyerName,
+    required double total,
+    required String orderId,
+  }) {
+    // 1. Show local notification (sound + vibration) even if app is open
+    NotificationService.instance.showOrderNotification(
+      title: '🛍️ New Order!',
+      body: '$buyerName • ₦${total.toStringAsFixed(0)}',
+      payload: 'new_order',
+    );
+
+    // 2. Show in-app persistent banner — can't be dismissed without action
+    if (mounted) {
+      _showNewOrderBanner(buyerName: buyerName, total: total, orderId: orderId);
+    }
+  }
+
+  void _showNewOrderBanner({
+    required String buyerName,
+    required double total,
+    required String orderId,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false, // must tap a button
+      builder: (ctx) => WillPopScope(
+        onWillPop: () async => false, // back button won't dismiss
+        child: AlertDialog(
+          backgroundColor: AppTheme.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          contentPadding: const EdgeInsets.all(24),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: AppTheme.success.withOpacity(0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.shopping_bag_rounded,
+                  color: AppTheme.success,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'New Order!',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'Poppins',
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                buyerName,
+                style: const TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: 14,
+                  fontFamily: 'Poppins',
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '₦${total.toStringAsFixed(0)}',
+                style: const TextStyle(
+                  color: AppTheme.primary,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'Poppins',
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        // Switch to orders tab
+                        setState(() => _currentIndex = 0);
+                      },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.textSecondary,
+                        side: const BorderSide(color: AppTheme.cardBorder),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text(
+                        'View',
+                        style: TextStyle(fontFamily: 'Poppins'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        await _acceptOrder(orderId);
+                        setState(() => _currentIndex = 0);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.success,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text(
+                        'Accept',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontFamily: 'Poppins',
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _acceptOrder(String orderId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('getit_orders')
+          .doc(orderId)
+          .update({
+            'shops.$_uid.status': 'confirmed', // ← update shop-level status
+            'status': 'confirmed', // ← change this
+            'acceptedAt': FieldValue.serverTimestamp(),
+          });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    }
   }
 
   Future<void> _loadShopStatus() async {
@@ -81,7 +304,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
 
   void _confirmToggle() {
     if (_isOpen) {
-      // Closing — show confirmation
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -133,7 +355,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
         ),
       );
     } else {
-      // Opening — no confirmation needed
       _toggleShopStatus();
     }
   }
@@ -156,7 +377,6 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
                 ),
               ),
               actions: [
-                // Open/Close toggle in app bar
                 Padding(
                   padding: const EdgeInsets.only(right: 16),
                   child: GestureDetector(
@@ -253,18 +473,18 @@ class _VendorHomeScreenState extends State<VendorHomeScreen> {
             fontFamily: 'Poppins',
             fontSize: 11,
           ),
-          items: [
+          items: const [
             BottomNavigationBarItem(
-              icon: const Icon(Icons.receipt_long_outlined),
-              activeIcon: const Icon(Icons.receipt_long_rounded),
+              icon: Icon(Icons.receipt_long_outlined),
+              activeIcon: Icon(Icons.receipt_long_rounded),
               label: 'Orders',
             ),
-            const BottomNavigationBarItem(
+            BottomNavigationBarItem(
               icon: Icon(Icons.inventory_2_outlined),
               activeIcon: Icon(Icons.inventory_2_rounded),
               label: 'Products',
             ),
-            const BottomNavigationBarItem(
+            BottomNavigationBarItem(
               icon: Icon(Icons.store_outlined),
               activeIcon: Icon(Icons.store_rounded),
               label: 'Shop',

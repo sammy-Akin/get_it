@@ -58,7 +58,7 @@ class _PickerDeliveriesScreenState extends State<PickerDeliveriesScreen>
             fontSize: 13,
           ),
           tabs: const [
-            Tab(text: 'Available'),
+            Tab(text: 'Waiting'),
             Tab(text: 'My Deliveries'),
           ],
         ),
@@ -66,7 +66,7 @@ class _PickerDeliveriesScreenState extends State<PickerDeliveriesScreen>
       body: TabBarView(
         controller: _tabController,
         children: [
-          _AvailableDeliveries(pickerId: _uid),
+          _WaitingForAssignment(pickerId: _uid),
           _MyDeliveries(pickerId: _uid),
         ],
       ),
@@ -74,55 +74,68 @@ class _PickerDeliveriesScreenState extends State<PickerDeliveriesScreen>
   }
 }
 
-class _AvailableDeliveries extends StatelessWidget {
+// ─── Waiting tab — replaces the old _AvailableDeliveries ─────────────────────
+// Pickers are assigned by the vendor, NOT by self-selecting from a list.
+// This tab shows a clear waiting state so the picker knows what to expect.
+
+class _WaitingForAssignment extends StatelessWidget {
   final String pickerId;
-  const _AvailableDeliveries({required this.pickerId});
+  const _WaitingForAssignment({required this.pickerId});
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('getit_orders')
-          .where('status', isEqualTo: 'ready_for_pickup')
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: CircularProgressIndicator(color: AppTheme.primary),
-          );
-        }
-
-        // Filter out orders already assigned to a picker
-        final docs = (snapshot.data?.docs ?? []).where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          return data['riderId'] == null || data['riderId'] == '';
-        }).toList();
-
-        if (docs.isEmpty) {
-          return _buildEmpty(
-            'No available deliveries',
-            'Orders ready for pickup will appear here',
-            Icons.delivery_dining_outlined,
-          );
-        }
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: docs.length,
-          itemBuilder: (context, index) {
-            final data = docs[index].data() as Map<String, dynamic>;
-            return _DeliveryCard(
-              orderId: docs[index].id,
-              data: data,
-              pickerId: pickerId,
-              isAvailable: true,
-            );
-          },
-        );
-      },
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 90,
+              height: 90,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withOpacity(0.1),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppTheme.primary.withOpacity(0.2),
+                  width: 2,
+                ),
+              ),
+              child: const Icon(
+                Icons.delivery_dining_rounded,
+                color: AppTheme.primary,
+                size: 44,
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Waiting for assignment',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'Poppins',
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'You will receive a notification when a vendor assigns a delivery to you. Make sure you are marked as Available.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 13,
+                fontFamily: 'Poppins',
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
+
+// ─── My Deliveries tab ────────────────────────────────────────────────────────
 
 class _MyDeliveries extends StatelessWidget {
   final String pickerId;
@@ -133,9 +146,13 @@ class _MyDeliveries extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('getit_orders')
-          .where('riderId', isEqualTo: pickerId)
+          .where('pickerId', isEqualTo: pickerId) // ✅ was 'riderId' — fixed
           .snapshots(),
       builder: (context, snapshot) {
+        debugPrint(
+          '📦 MyDeliveries snapshot: ${snapshot.data?.docs.length} docs for pickerId=$pickerId',
+        );
+
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(
             child: CircularProgressIndicator(color: AppTheme.primary),
@@ -147,7 +164,7 @@ class _MyDeliveries extends StatelessWidget {
         if (docs.isEmpty) {
           return _buildEmpty(
             'No active deliveries',
-            'Accept a delivery from the Available tab',
+            'Accepted deliveries will appear here',
             Icons.inbox_outlined,
           );
         }
@@ -157,11 +174,13 @@ class _MyDeliveries extends StatelessWidget {
           itemCount: docs.length,
           itemBuilder: (context, index) {
             final data = docs[index].data() as Map<String, dynamic>;
+            debugPrint(
+              '📋 Delivery card — orderId: ${docs[index].id}, status: ${data['status']}',
+            );
             return _DeliveryCard(
               orderId: docs[index].id,
               data: data,
               pickerId: pickerId,
-              isAvailable: false,
             );
           },
         );
@@ -170,50 +189,71 @@ class _MyDeliveries extends StatelessWidget {
   }
 }
 
+// ─── Delivery Card ────────────────────────────────────────────────────────────
+
 class _DeliveryCard extends StatelessWidget {
   final String orderId;
   final Map<String, dynamic> data;
   final String pickerId;
-  final bool isAvailable;
 
   const _DeliveryCard({
     required this.orderId,
     required this.data,
     required this.pickerId,
-    required this.isAvailable,
   });
 
-  Future<void> _acceptDelivery(BuildContext context) async {
-    final user = FirebaseAuth.instance.currentUser;
-    await FirebaseFirestore.instance
-        .collection('getit_orders')
-        .doc(orderId)
-        .update({
-          'riderId': pickerId,
-          'riderName': user?.displayName ?? 'Picker',
-          'status': 'rider_assigned',
-        });
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Delivery accepted! ₦150 will be credited on completion.',
-          ),
-          backgroundColor: AppTheme.success,
-        ),
-      );
-    }
-  }
+  /// Updates the top-level order status AND all shop-level statuses so the
+  /// vendor screen reflects the correct state in real time.
+  Future<void> _updateStatus(BuildContext context, String newStatus) async {
+    debugPrint(
+      '🔄 _updateStatus called: orderId=$orderId, newStatus=$newStatus',
+    );
+    try {
+      final orderRef = FirebaseFirestore.instance
+          .collection('getit_orders')
+          .doc(orderId);
 
-  Future<void> _updateStatus(String status) async {
-    final update = <String, dynamic>{'status': status};
-    if (status == 'delivered') {
-      update['deliveredAt'] = FieldValue.serverTimestamp();
+      final doc = await orderRef.get();
+      final shops = (doc.data()?['shops'] as Map<String, dynamic>?) ?? {};
+
+      final Map<String, dynamic> updates = {'status': newStatus};
+
+      if (newStatus == 'out_for_delivery') {
+        for (final shopId in shops.keys) {
+          updates['shops.$shopId.status'] = 'picked_up';
+        }
+      }
+
+      if (newStatus == 'delivered') {
+        updates['deliveredAt'] = FieldValue.serverTimestamp();
+        for (final shopId in shops.keys) {
+          updates['shops.$shopId.status'] = 'picked_up';
+        }
+      }
+
+      await orderRef.update(updates);
+      debugPrint('✅ Order $orderId updated to: $newStatus');
+
+      if (newStatus == 'delivered') {
+        await FirebaseFirestore.instance
+            .collection('getit_riders')
+            .doc(pickerId)
+            .update({
+              'currentOrderId': '',
+              'isAvailable': true, // ← reset to available after delivery
+              'totalDeliveries': FieldValue.increment(1),
+              'totalEarnings': FieldValue.increment(150),
+            });
+        debugPrint('✅ Picker freed up and set available after delivery');
+      }
+    } catch (e) {
+      debugPrint('🚨 _updateStatus error: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
     }
-    await FirebaseFirestore.instance
-        .collection('getit_orders')
-        .doc(orderId)
-        .update(update);
   }
 
   @override
@@ -227,16 +267,11 @@ class _DeliveryCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isAvailable
-              ? AppTheme.primary.withOpacity(0.4)
-              : AppTheme.cardBorder,
-          width: isAvailable ? 1.5 : 1,
-        ),
+        border: Border.all(color: AppTheme.cardBorder),
       ),
       child: Column(
         children: [
-          // Header
+          // ── Header ────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
             child: Row(
@@ -265,13 +300,10 @@ class _DeliveryCard extends StatelessWidget {
                       ),
                   ],
                 ),
-                // Status + Incentive
                 Row(
                   children: [
-                    if (!isAvailable) ...[
-                      _buildStatusBadge(status),
-                      const SizedBox(width: 8),
-                    ],
+                    _buildStatusBadge(status),
+                    const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 10,
@@ -281,9 +313,9 @@ class _DeliveryCard extends StatelessWidget {
                         color: AppTheme.success.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Text(
-                        '₦150',
-                        style: TextStyle(
+                      child: Text(
+                        '₦${(data['pickerEarning'] as num?)?.toStringAsFixed(0) ?? '150'}',
+                        style: const TextStyle(
                           color: AppTheme.success,
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
@@ -299,11 +331,11 @@ class _DeliveryCard extends StatelessWidget {
 
           const Divider(height: 1, color: AppTheme.divider),
 
+          // ── Shops ─────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
-                // Shops to pick up from
                 ...shops.entries.map((entry) {
                   final shop = entry.value as Map<String, dynamic>;
                   final shopName = shop['shopName'] ?? 'Shop';
@@ -351,7 +383,7 @@ class _DeliveryCard extends StatelessWidget {
                             ],
                           ),
                         ),
-                        if (shopStatus == 'ready')
+                        if (shopStatus == 'ready' || shopStatus == 'picked_up')
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -361,9 +393,9 @@ class _DeliveryCard extends StatelessWidget {
                               color: AppTheme.success.withOpacity(0.12),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: const Text(
-                              'Ready',
-                              style: TextStyle(
+                            child: Text(
+                              shopStatus == 'picked_up' ? 'Picked Up' : 'Ready',
+                              style: const TextStyle(
                                 color: AppTheme.success,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
@@ -402,8 +434,8 @@ class _DeliveryCard extends StatelessWidget {
                   ],
                 ),
 
-                // Order total
                 const SizedBox(height: 8),
+
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -430,7 +462,7 @@ class _DeliveryCard extends StatelessWidget {
             ),
           ),
 
-          // Action buttons
+          // ── Action button ─────────────────────────────────────────
           const Divider(height: 1, color: AppTheme.divider),
           Padding(
             padding: const EdgeInsets.all(12),
@@ -445,7 +477,8 @@ class _DeliveryCard extends StatelessWidget {
     Color color;
     String label;
     switch (status) {
-      case 'rider_assigned':
+      case 'assigned':
+      case 'picked_up':
         color = Colors.orange;
         label = 'Assigned';
         break;
@@ -491,79 +524,81 @@ class _DeliveryCard extends StatelessWidget {
   }
 
   Widget _buildActionButton(BuildContext context, String status) {
-    if (isAvailable) {
-      return ElevatedButton(
-        onPressed: () => _acceptDelivery(context),
-        style: ElevatedButton.styleFrom(
-          minimumSize: const Size(double.infinity, 44),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-        child: const Text(
-          'Accept Delivery — Earn ₦150',
-          style: TextStyle(fontFamily: 'Poppins', fontSize: 13),
-        ),
-      );
-    }
-
     switch (status) {
-      case 'rider_assigned':
+      case 'assigned':
+      case 'picked_up':
+        // ✅ Picker taps this to confirm they have physically collected the order
         return ElevatedButton(
-          onPressed: () => _updateStatus('out_for_delivery'),
+          onPressed: () => _updateStatus(context, 'out_for_delivery'),
           style: ElevatedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 44),
+            minimumSize: const Size(double.infinity, 46),
             backgroundColor: Colors.orange,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
           child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.delivery_dining_rounded, size: 18),
+              Icon(
+                Icons.delivery_dining_rounded,
+                size: 18,
+                color: Colors.white,
+              ),
               SizedBox(width: 8),
               Text(
                 'Picked Up — Start Delivery',
-                style: TextStyle(fontFamily: 'Poppins', fontSize: 13),
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 13,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
         );
+
       case 'out_for_delivery':
         return ElevatedButton(
-          onPressed: () => _updateStatus('delivered'),
+          onPressed: () => _updateStatus(context, 'delivered'),
           style: ElevatedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 44),
+            minimumSize: const Size(double.infinity, 46),
             backgroundColor: AppTheme.success,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(12),
             ),
           ),
           child: const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.check_circle_rounded, size: 18),
+              Icon(Icons.check_circle_rounded, size: 18, color: Colors.white),
               SizedBox(width: 8),
               Text(
                 'Mark as Delivered',
-                style: TextStyle(fontFamily: 'Poppins', fontSize: 13),
+                style: TextStyle(
+                  fontFamily: 'Poppins',
+                  fontSize: 13,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
         );
+
       case 'delivered':
         return Container(
           width: double.infinity,
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 13),
           decoration: BoxDecoration(
             color: AppTheme.success.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppTheme.success.withOpacity(0.3)),
           ),
           child: const Center(
             child: Text(
-              '✓ Delivered — ₦150 earned',
+              '✓ Delivered — Earnings credited',
               style: TextStyle(
                 color: AppTheme.success,
                 fontFamily: 'Poppins',
@@ -573,6 +608,7 @@ class _DeliveryCard extends StatelessWidget {
             ),
           ),
         );
+
       default:
         return const SizedBox.shrink();
     }
@@ -581,11 +617,14 @@ class _DeliveryCard extends StatelessWidget {
   String _formatDate(DateTime date) {
     final now = DateTime.now();
     final diff = now.difference(date);
+    if (diff.inMinutes < 1) return 'Just now';
     if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
     if (diff.inHours < 24) return '${diff.inHours}h ago';
     return '${date.day}/${date.month}/${date.year}';
   }
 }
+
+// ─── Empty state helper ───────────────────────────────────────────────────────
 
 Widget _buildEmpty(String title, String subtitle, IconData icon) {
   return Center(

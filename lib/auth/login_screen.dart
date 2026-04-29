@@ -17,7 +17,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _authService = AuthService();
 
   bool _isLoading = false;
-  bool _isGoogleLoading = false;
   bool _obscurePassword = true;
 
   @override
@@ -61,12 +60,28 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<void> _signInWithGoogle() async {
-    setState(() => _isGoogleLoading = true);
+  Future<void> _forgotPassword() async {
+    final email = _emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter your email address first')),
+      );
+      return;
+    }
+    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address')),
+      );
+      return;
+    }
     try {
-      final result = await _authService.signInWithGoogle();
-      if (result?.user != null && mounted) {
-        await _routeByRole(result!.user!.uid);
+      await _authService.resetPassword(email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Password reset email sent. Check your inbox.'),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -74,8 +89,6 @@ class _LoginScreenState extends State<LoginScreen> {
           context,
         ).showSnackBar(SnackBar(content: Text(e.toString())));
       }
-    } finally {
-      if (mounted) setState(() => _isGoogleLoading = false);
     }
   }
 
@@ -209,7 +222,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: () {},
+                        onPressed: _forgotPassword,
                         child: const Text(
                           'Forgot password?',
                           style: TextStyle(
@@ -236,90 +249,36 @@ class _LoginScreenState extends State<LoginScreen> {
                           : const Text('Sign In'),
                     ),
 
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 32),
 
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Expanded(child: Divider(color: AppTheme.divider)),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Text(
-                            'or continue with',
+                        const Text(
+                          "Don't have an account? ",
+                          style: TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontFamily: 'Poppins',
+                          ),
+                        ),
+                        GestureDetector(
+                          onTap: () => context.push('/register'),
+                          child: const Text(
+                            'Sign Up',
                             style: TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 13,
+                              color: AppTheme.primary,
+                              fontWeight: FontWeight.w600,
                               fontFamily: 'Poppins',
                             ),
                           ),
                         ),
-                        const Expanded(child: Divider(color: AppTheme.divider)),
                       ],
                     ),
 
-                    const SizedBox(height: 24),
-
-                    OutlinedButton(
-                      onPressed: _isGoogleLoading ? null : _signInWithGoogle,
-                      child: _isGoogleLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Image.network(
-                                  'https://www.google.com/favicon.ico',
-                                  width: 20,
-                                  height: 20,
-                                  errorBuilder: (_, __, ___) => const Icon(
-                                    Icons.g_mobiledata,
-                                    color: AppTheme.primary,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                const Text(
-                                  'Continue with Google',
-                                  style: TextStyle(
-                                    color: AppTheme.textPrimary,
-                                    fontFamily: 'Poppins',
-                                  ),
-                                ),
-                              ],
-                            ),
-                    ),
+                    const SizedBox(height: 32),
                   ],
                 ),
               ),
-
-              const SizedBox(height: 32),
-
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    "Don't have an account? ",
-                    style: TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontFamily: 'Poppins',
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: () => context.push('/register'),
-                    child: const Text(
-                      'Sign Up',
-                      style: TextStyle(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.w600,
-                        fontFamily: 'Poppins',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 32),
             ],
           ),
         ),

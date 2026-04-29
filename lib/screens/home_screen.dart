@@ -823,7 +823,7 @@ class _HomeScreenState extends State<HomeScreen> {
           shop.latitude,
           shop.longitude,
         );
-        return distance <= 800;
+        return distance <= 1500;
       }).toList();
       nearbyByCoords.sort((a, b) {
         final da = Geolocator.distanceBetween(

@@ -11,6 +11,92 @@ const db = admin.firestore();
 
 const paystackSecret = defineSecret("PAYSTACK_SECRET_KEY");
 
+// ─── Helper: Send FCM notification to a user by uid ──────────────────────────
+async function sendNotificationToUser({ uid, title, body, data = {} }) {
+  try {
+    const userDoc = await db.collection("getit_users").doc(uid).get();
+    const token = userDoc.data()?.fcmToken;
+    if (!token) {
+      console.log(`No FCM token for user ${uid}`);
+      return;
+    }
+    await admin.messaging().send({
+      token,
+      notification: { title, body },
+      data,
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "getit_orders",
+          priority: "max",
+          defaultVibrateTimings: false,
+          vibrateTimingsMillis: ["0", "500", "200", "500"],
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+            badge: 1,
+            "interruption-level": "time-sensitive",
+          },
+        },
+      },
+    });
+    console.log(`Notification sent to ${uid}: ${title}`);
+  } catch (err) {
+    console.error(`Failed to send notification to ${uid}:`, err.message);
+  }
+}
+
+// ─── Send Notification (HTTP endpoint for Flutter to call) ───────────────────
+exports.sendNotification = onRequest(async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") return res.status(204).send("");
+  if (req.method !== "POST") return res.status(405).send("Method Not Allowed");
+
+  const { token, title, body, data } = req.body;
+
+  if (!token || !title || !body) {
+    return res.status(400).json({ error: "Missing token, title or body" });
+  }
+
+  try {
+    await admin.messaging().send({
+      token,
+      notification: { title, body },
+      data: data || {},
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "getit_orders",
+          priority: "max",
+          defaultVibrateTimings: false,
+          vibrateTimingsMillis: ["0", "500", "200", "500"],
+        },
+      },
+      apns: {
+        payload: {
+          aps: {
+            sound: "default",
+            badge: 1,
+            "interruption-level": "time-sensitive",
+          },
+        },
+      },
+    });
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error("sendNotification error:", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Paystack Webhook ─────────────────────────────────────────────────────────
 exports.paystackWebhook = onRequest(
   { secrets: [paystackSecret] },
@@ -84,12 +170,23 @@ exports.paystackWebhook = onRequest(
 
           await orderRef.update({
             paymentStatus: "paid",
-            status: "confirmed",
+            status: "pending",
             paystackReference: reference,
             paidAt: admin.firestore.FieldValue.serverTimestamp(),
             webhookVerified: true,
             amountPaid: amount / 100,
           });
+
+          // Notify each vendor in this order
+          const shops = order.shops || {};
+          for (const vendorId of Object.keys(shops)) {
+            await sendNotificationToUser({
+              uid: vendorId,
+              title: "🛍️ New Order!",
+              body: `${order.customerName || order.buyerName || "A customer"} placed an order • ₦${order.total?.toFixed(0) || ""}`,
+              data: { type: "new_order", orderId: reference },
+            });
+          }
 
           console.log("Order confirmed via webhook:", reference);
         } else {
@@ -106,19 +203,28 @@ exports.paystackWebhook = onRequest(
               return res.status(200).send("OK");
             }
 
-            // Write confirmed order
             await db.collection("getit_orders").doc(reference).set({
               ...orderData,
               paymentStatus: "paid",
-              status: "confirmed",
+              status: "pending",
               paystackReference: reference,
               paidAt: admin.firestore.FieldValue.serverTimestamp(),
               webhookVerified: true,
               amountPaid: amount / 100,
             });
 
-            // Delete temp doc
             await pendingRef.delete();
+
+            // Notify each vendor for web orders too
+            const shops = orderData.shops || {};
+            for (const vendorId of Object.keys(shops)) {
+              await sendNotificationToUser({
+                uid: vendorId,
+                title: "🛍️ New Order!",
+                body: `${orderData.customerName || orderData.buyerName || "A customer"} placed an order • ₦${orderData.total?.toFixed(0) || ""}`,
+                data: { type: "new_order", orderId: reference },
+              });
+            }
 
             console.log("Web order confirmed via webhook:", reference);
           } else {
@@ -166,7 +272,7 @@ exports.initializePayment = onRequest(
           amount: parseInt(amount),
           reference,
           currency: currency || "NGN",
-          callback_url: "https://getit-db879.web.app/payment/callback", // ← added
+          callback_url: "https://getit-db879.web.app/payment/callback",
         },
         {
           headers: {
@@ -211,9 +317,7 @@ exports.verifyPayment = onRequest(
     try {
       const response = await axios.get(
         `https://api.paystack.co/transaction/verify/${reference}`,
-        {
-          headers: { Authorization: `Bearer ${secret}` },
-        }
+        { headers: { Authorization: `Bearer ${secret}` } }
       );
 
       const data = response.data;
@@ -233,6 +337,8 @@ exports.verifyPayment = onRequest(
 );
 
 // ─── Auto-assign Picker ───────────────────────────────────────────────────────
+// Triggered when vendor marks all items ready → Flutter sets status "ready_for_pickup"
+// This function owns assignment — Flutter no longer calls _assignNearestPicker
 exports.autoAssignPicker = onDocumentUpdated(
   "getit_orders/{orderId}",
   async (event) => {
@@ -242,7 +348,7 @@ exports.autoAssignPicker = onDocumentUpdated(
 
     if (before.status === after.status) return null;
     if (after.status !== "ready_for_pickup") return null;
-    if (after.riderId) return null;
+    if (after.pickerId) return null; // ✅ correct field — was after.riderId
 
     console.log("Finding picker for order:", orderId);
 
@@ -250,7 +356,7 @@ exports.autoAssignPicker = onDocumentUpdated(
       const pickersSnap = await db
         .collection("getit_riders")
         .where("isAvailable", "==", true)
-        .limit(5)
+        .limit(10)
         .get();
 
       if (pickersSnap.empty) {
@@ -258,22 +364,83 @@ exports.autoAssignPicker = onDocumentUpdated(
         return null;
       }
 
-      const picker = pickersSnap.docs[0];
+      // Filter out riders that already have an active order
+      const freePickers = pickersSnap.docs.filter((doc) => {
+        const d = doc.data();
+        return !d.currentOrderId || d.currentOrderId === "";
+      });
+
+      if (freePickers.length === 0) {
+        console.log("All riders are busy for order:", orderId);
+        return null;
+      }
+
+      // Pick the rider whose location was updated most recently
+      freePickers.sort((a, b) => {
+        const aT = a.data().locationUpdatedAt;
+        const bT = b.data().locationUpdatedAt;
+        if (!aT || !bT) return 0;
+        return bT.toMillis() - aT.toMillis();
+      });
+
+      const picker = freePickers[0];
       const pickerData = picker.data();
+      const pickerName = pickerData.name || pickerData.displayName || "Rider";
 
-      await event.data.after.ref.update({
-        riderId: picker.id,
-        riderName: pickerData.name,
-        status: "rider_assigned",
-        assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+      await db.runTransaction(async (transaction) => {
+        const freshOrder = await transaction.get(event.data.after.ref);
+        const freshOrderData = freshOrder.data();
+
+        // Abort if another invocation already assigned someone
+        if (freshOrderData?.pickerId) {
+          console.log("Picker already assigned — aborting transaction");
+          return;
+        }
+
+        const riderRef = db.collection("getit_riders").doc(picker.id);
+        const freshRider = await transaction.get(riderRef);
+        const riderCurrentOrder = freshRider.data()?.currentOrderId;
+
+        if (riderCurrentOrder && riderCurrentOrder !== "") {
+          console.log("Rider already busy — aborting transaction");
+          return;
+        }
+
+        // Mark every shop in the order as "assigned"
+        const shops = freshOrderData?.shops || {};
+        const shopUpdates = {};
+        for (const shopId of Object.keys(shops)) {
+          shopUpdates[`shops.${shopId}.status`] = "assigned"; // ✅ was "rider_assigned"
+        }
+
+        transaction.update(event.data.after.ref, {
+          ...shopUpdates,
+          pickerId: picker.id,   // ✅ was riderId
+          pickerName,            // ✅ was riderName
+          pickerEarning: 150,
+          status: "assigned",    // ✅ was "rider_assigned"
+          assignedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        transaction.update(riderRef, {
+          isAvailable: false,
+          currentOrderId: orderId,
+        });
       });
 
-      await db.collection("getit_riders").doc(picker.id).update({
-        isAvailable: false,
-        currentOrderId: orderId,
+      // Send FCM to the picker
+      const vendorName =
+        Object.values(after.shops || {})[0]?.shopName || "the vendor";
+      const deliveryAddress = after.deliveryAddress || "customer location";
+
+      await sendNotificationToUser({
+        uid: picker.id,
+        title: "🚴 New Delivery Assigned!",
+        body: `Pickup from ${vendorName} → ${deliveryAddress}`,
+        data: { type: "delivery_assigned", orderId },
       });
 
-      console.log(`Picker ${picker.id} assigned to order ${orderId}`);
+      console.log(`✅ Picker ${picker.id} assigned and notified for order ${orderId}`);
     } catch (err) {
       console.error("Auto-assign error:", err.message);
     }
@@ -291,20 +458,23 @@ exports.releasePickerOnDelivery = onDocumentUpdated(
 
     if (before.status === after.status) return null;
     if (after.status !== "delivered") return null;
-    if (!after.riderId) return null;
+    if (!after.pickerId) return null; // ✅ was after.riderId
 
     try {
-      await db.collection("getit_riders").doc(after.riderId).update({
+      await db.collection("getit_riders").doc(after.pickerId).update({ // ✅ was after.riderId
         isAvailable: true,
-        currentOrderId: null,
+        currentOrderId: "",
         totalDeliveries: admin.firestore.FieldValue.increment(1),
-        totalEarnings: admin.firestore.FieldValue.increment(150),
+        totalEarnings: admin.firestore.FieldValue.increment(
+          after.pickerEarning || 150
+        ),
       });
 
       await event.data.after.ref.update({
         deliveredAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 
+      // Credit each vendor's earnings
       const shops = after.shops || {};
       for (const [vendorId, shopData] of Object.entries(shops)) {
         const items = shopData.items || [];
@@ -314,10 +484,13 @@ exports.releasePickerOnDelivery = onDocumentUpdated(
         }
         if (vendorTotal > 0) {
           try {
-            await db.collection("getit_vendors").doc(vendorId).set({
-              totalEarnings: admin.firestore.FieldValue.increment(vendorTotal),
-              withdrawnAmount: admin.firestore.FieldValue.increment(0),
-            }, { merge: true });
+            await db.collection("getit_vendors").doc(vendorId).set(
+              {
+                totalEarnings: admin.firestore.FieldValue.increment(vendorTotal),
+                withdrawnAmount: admin.firestore.FieldValue.increment(0),
+              },
+              { merge: true }
+            );
             console.log(`Credited ₦${vendorTotal} to vendor ${vendorId}`);
           } catch (vendorErr) {
             console.error(`Failed to credit vendor ${vendorId}:`, vendorErr.message);
@@ -325,7 +498,7 @@ exports.releasePickerOnDelivery = onDocumentUpdated(
         }
       }
 
-      console.log(`Picker ${after.riderId} released after delivery`);
+      console.log(`✅ Picker ${after.pickerId} released after delivery of order ${event.params.orderId}`);
     } catch (err) {
       console.error("Release picker error:", err.message);
     }
@@ -420,7 +593,12 @@ exports.withdrawEarnings = onRequest(
           bank_code: bankCode,
           currency: "NGN",
         },
-        { headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" } }
+        {
+          headers: {
+            Authorization: `Bearer ${secret}`,
+            "Content-Type": "application/json",
+          },
+        }
       );
 
       const recipientCode = recipientRes.data.data.recipient_code;
@@ -433,7 +611,12 @@ exports.withdrawEarnings = onRequest(
           recipient: recipientCode,
           reason: `Get It picker earnings - ${pickerId.substring(0, 8)}`,
         },
-        { headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" } }
+        {
+          headers: {
+            Authorization: `Bearer ${secret}`,
+            "Content-Type": "application/json",
+          },
+        }
       );
 
       const transfer = transferRes.data.data;
@@ -513,7 +696,12 @@ exports.withdrawVendorEarnings = onRequest(
           bank_code: bankCode,
           currency: "NGN",
         },
-        { headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" } }
+        {
+          headers: {
+            Authorization: `Bearer ${secret}`,
+            "Content-Type": "application/json",
+          },
+        }
       );
 
       const recipientCode = recipientRes.data.data.recipient_code;
@@ -526,7 +714,12 @@ exports.withdrawVendorEarnings = onRequest(
           recipient: recipientCode,
           reason: `Get It vendor earnings - ${vendorId.substring(0, 8)}`,
         },
-        { headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" } }
+        {
+          headers: {
+            Authorization: `Bearer ${secret}`,
+            "Content-Type": "application/json",
+          },
+        }
       );
 
       const transfer = transferRes.data.data;

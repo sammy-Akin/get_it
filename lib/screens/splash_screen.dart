@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
-// ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html show window;
 import '../core/theme.dart';
 import '../services/auth_service.dart';
 
@@ -40,32 +38,45 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> _navigate() async {
-    // Critical: if this is a payment callback page reload, do NOT navigate
-    // away. The PaymentCallbackScreen handles everything from here.
+    // If this is a Paystack payment callback on web, do not navigate away.
+    // PaymentCallbackScreen handles everything from here.
     if (kIsWeb) {
-      final uri = Uri.parse(html.window.location.href);
+      final uri = Uri.base;
       if (uri.path.contains('/payment/callback')) return;
     }
 
-    await Future.delayed(const Duration(seconds: 2));
+    // Wait for both the animation AND Firebase auth state — whichever is slower.
+    // Using authStateChanges().first instead of currentUser because on mobile,
+    // currentUser is null until Firebase restores the session asynchronously.
+    final results = await Future.wait([
+      Future.delayed(const Duration(seconds: 2)),
+      FirebaseAuth.instance.authStateChanges().first,
+    ]);
+
     if (!mounted) return;
 
-    final user = FirebaseAuth.instance.currentUser;
+    final user = results[1] as User?;
 
     if (user == null) {
       context.go('/onboarding');
       return;
     }
 
-    final role = await AuthService().getUserRole(user.uid);
-    if (!mounted) return;
+    try {
+      final role = await AuthService().getUserRole(user.uid);
+      if (!mounted) return;
 
-    if (role == 'vendor') {
-      context.go('/vendor-home');
-    } else if (role == 'picker') {
-      context.go('/picker-home');
-    } else {
-      context.go('/home');
+      if (role == 'vendor') {
+        context.go('/vendor-home');
+      } else if (role == 'picker') {
+        context.go('/picker-home');
+      } else {
+        context.go('/home');
+      }
+    } catch (e) {
+      debugPrint('getUserRole failed: $e');
+      // Firestore read failed (offline/slow) — still get them into the app
+      if (mounted) context.go('/home');
     }
   }
 

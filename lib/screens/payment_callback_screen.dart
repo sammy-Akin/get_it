@@ -17,7 +17,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html show window;
+
 import '../core/theme.dart';
 
 class PaymentCallbackScreen extends StatefulWidget {
@@ -43,7 +43,7 @@ class _PaymentCallbackScreenState extends State<PaymentCallbackScreen> {
       String? reference;
 
       if (kIsWeb) {
-        final uri = Uri.parse(html.window.location.href);
+        final uri = Uri.base;
         reference =
             uri.queryParameters['reference'] ?? uri.queryParameters['trxref'];
       }
