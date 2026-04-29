@@ -1,4 +1,6 @@
-# Miscellaneous
+# =========================
+# GENERAL
+# =========================
 *.class
 *.log
 *.pyc
@@ -12,40 +14,78 @@
 .swiftpm/
 migrate_working_dir/
 
-# IntelliJ related
+# =========================
+# IDE / EDITOR
+# =========================
 *.iml
 *.ipr
 *.iws
 .idea/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
+# VS Code (optional – uncomment if you don’t want to track settings)
 #.vscode/
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# =========================
+# FLUTTER / DART
+# =========================
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
-.pub-cache/
 .pub/
-/build/
+.pub-cache/
+build/
 
-# Symbolication related
-app.*.symbols
+# Generated docs
+**/doc/api/
 
-# Obfuscation related
-app.*.map.json
+# Flutter iOS
+**/ios/Flutter/.last_build_id
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# =========================
+# ANDROID
+# =========================
+android/.gradle/
+android/app/build/
+
+# DO NOT IGNORE IMPORTANT FILES:
+# android/app/src/main/AndroidManifest.xml ❌ (keep this tracked)
+
+# =========================
+# iOS
+# =========================
+ios/Pods/
+
+# DO NOT IGNORE IMPORTANT FILES:
+# ios/Runner/AppDelegate.swift ❌ (keep this tracked)
+
+# =========================
+# WEB BUILD
+# =========================
+build/web/
+
+# =========================
+# FIREBASE
+# =========================
+.firebase/
+firebase-debug.log
 functions/.env
-# Node.js (Firebase Functions)
+
+# =========================
+# NODE (Firebase Functions)
+# =========================
 node_modules/
 functions/node_modules/
-android/app/src/main/AndroidManifest.xml
-ios/Runner/AppDelegate.swift
+
+# =========================
+# BINARY FILES (VERY IMPORTANT)
+# =========================
+*.apk
+*.aab
+*.ipa
+*.zip
+
+# =========================
+# SYMBOLICATION / OBFUSCATION
+# =========================
+app.*.symbols
+app.*.map.json
